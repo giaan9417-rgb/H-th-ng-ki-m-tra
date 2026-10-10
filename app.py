@@ -18,7 +18,6 @@ st.set_page_config(
 def init_db():
     conn = sqlite3.connect("exam_system_v7.db", check_same_thread=False)
     cursor = conn.cursor()
-    # Bật chế độ WAL để cho phép nhiều người đọc/ghi đồng thời không bị lỗi locked
     cursor.execute("PRAGMA journal_mode=WAL;")
     
     cursor.execute("""
@@ -122,12 +121,11 @@ def parse_docx_to_questions(docx_file):
         questions.append(current_q)
     return questions
 
-# --- KIỂM TRA TÍN HIỆU VI PHẠM TỪ HỌC SINH (NẾU CÓ) ---
+# --- KIỂM TRA TÍN HIỆU VI PHẠM TỪ HỌC SINH ---
 if st.query_params.get("violated") == "true":
     if "user" in st.session_state and st.session_state.user and st.session_state.user["role"] == "Học sinh":
         u = st.session_state.user
         e_code = st.session_state.get("active_exam", "UNKNOWN")
-        # Ghi nhận vi phạm vào database
         cursor.execute("""
             INSERT INTO submissions (exam_code, student_email, student_name, student_id, stt, class_name, score, violations, status, submitted_at, details)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -137,8 +135,9 @@ if st.query_params.get("violated") == "true":
             json.dumps([{"error": "Học sinh rời khỏi tab hoặc mở trợ lý AI trong lúc thi"}], ensure_ascii=False)
         ))
         conn.commit()
-        if "active_exam" in st.session_state:
-            del st.session_state["active_exam"]
+        for key in ["active_exam", "active_exam_title", "active_exam_duration", "active_exam_questions"]:
+            if key in st.session_state:
+                del st.session_state[key]
     st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Bài làm đã bị khóa và báo cáo về cho giáo viên.")
     if st.button("Quay lại màn hình chính"):
         st.query_params.clear()
@@ -299,10 +298,22 @@ if user["role"] == "Học sinh":
         st.stop()
         
     if st.button("🚀 Bắt Đầu Làm Bài Ngay"):
-        st.session_state.active_exam = exam_code_input
-        st.rerun()
+        cursor.execute("SELECT questions FROM exams WHERE exam_code = ?", (exam_code_input,))
+        q_row = cursor.fetchone()
+        if q_row:
+            st.session_state.active_exam = exam_code_input
+            st.session_state.active_exam_title = exam_title
+            st.session_state.active_exam_duration = exam_duration
+            st.session_state.active_exam_questions = json.loads(q_row[0])
+            st.rerun()
+        else:
+            st.error("❌ Không tìm thấy dữ liệu đề thi này trong hệ thống!")
         
-    if "active_exam" in st.session_state and st.session_state.active_exam == exam_code_input:
+    if "active_exam" in st.session_state:
+        exam_title = st.session_state.active_exam_title
+        exam_duration = st.session_state.active_exam_duration
+        questions = st.session_state.active_exam_questions
+        
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
             <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO</h4>
@@ -422,7 +433,7 @@ if user["role"] == "Học sinh":
                 INSERT INTO submissions (exam_code, student_email, student_name, student_id, stt, class_name, score, violations, status, submitted_at, details)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                exam_code_input,
+                st.session_state.active_exam,
                 user["email"],
                 user["name"],
                 user["student_id"],
@@ -436,10 +447,13 @@ if user["role"] == "Học sinh":
             ))
             conn.commit()
             
-            cursor.execute("SELECT show_score FROM exams WHERE exam_code = ?", (exam_code_input,))
-            show_score_setting = cursor.fetchone()[0]
+            cursor.execute("SELECT show_score FROM exams WHERE exam_code = ?", (st.session_state.active_exam,))
+            show_row = cursor.fetchone()
+            show_score_setting = show_row[0] if show_row else 1
             
-            del st.session_state.active_exam
+            for key in ["active_exam", "active_exam_title", "active_exam_duration", "active_exam_questions"]:
+                if key in st.session_state:
+                    del st.session_state[key]
             
             exit_script = "<script>if (document.fullscreenElement) { document.exitFullscreen(); }</script>"
             components.html(exit_script, height=0)
@@ -452,7 +466,7 @@ if user["role"] == "Học sinh":
             st.rerun()
 
 # ==========================================
-# GIAO DIỆN GIÁO VIÊN / QUẢN TRỊ (KHÔNG BỊ ÉP FULLSCREEN)
+# GIAO DIỆN GIÁO VIÊN / QUẢN TRỊ
 # ==========================================
 elif user["role"] == "Giáo viên / Quản trị viên":
     st.title("⚙️ Cổng Quản Lý Giáo Viên & Kho Đề Thi")
