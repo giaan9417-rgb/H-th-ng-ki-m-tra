@@ -8,7 +8,7 @@ from docx import Document
 
 # --- CẤU HÌNH TRANG ---
 st.set_page_config(
-    page_title="Hệ Thống Kiểm Tra & Thi Trực Tuyến Thông Minh",
+    page_title="Hệ Thống Kiểm Tra Trực Tuyến & Chống Gian Lận",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -16,7 +16,7 @@ st.set_page_config(
 
 # --- KHỞI TẠO DATABASE SQLITE ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v3.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v4.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -30,19 +30,20 @@ def init_db():
         )
     """)
     cursor.execute("""
+        CREATE TABLE IF NOT EXISTS classes (
+            class_name TEXT PRIMARY KEY,
+            created_at TEXT
+        )
+    """)
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS exams (
             exam_code TEXT PRIMARY KEY,
             title TEXT,
             class_target TEXT,
             duration INTEGER,
             max_attempts INTEGER,
+            show_score INTEGER,
             questions TEXT,
-            created_at TEXT
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS classes (
-            class_name TEXT PRIMARY KEY,
             created_at TEXT
         )
     """)
@@ -57,6 +58,7 @@ def init_db():
             class_name TEXT,
             score REAL,
             violations INTEGER,
+            status TEXT,
             submitted_at TEXT,
             details TEXT
         )
@@ -74,7 +76,7 @@ def init_db():
     return conn
 
 conn = init_db()
-cursor = conn.cursor()  # Khởi tạo cursor toàn cục để dùng chung cho toàn bộ ứng dụng
+cursor = conn.cursor()
 
 # --- HÀM PHÂN TÍCH FILE WORD (.DOCX) DỰA TRÊN ĐỊNH DẠNG GẠCH CHÂN ---
 def parse_docx_to_questions(docx_file):
@@ -97,7 +99,8 @@ def parse_docx_to_questions(docx_file):
                 "type": "mcq", 
                 "options": [],
                 "statements": [],
-                "answer": ""
+                "answer": "",
+                "points": 1.0 # Mặc định mỗi câu 1 điểm
             }
         elif current_q is not None:
             if (len(text) > 1 and text[0].upper() in ['A', 'B', 'C', 'D'] and text[1] in ['.', ')', ' ']):
@@ -116,7 +119,7 @@ def parse_docx_to_questions(docx_file):
         questions.append(current_q)
     return questions
 
-# --- HỆ THỐNG XÁC THỰC GOOGLE & ĐĂNG NHẬP THÔNG MINH ---
+# --- HỆ THỐNG XÁC THỰC & ĐĂNG NHẬP ---
 st.sidebar.title("🔐 Đăng Nhập Hệ Thống")
 
 if "user" not in st.session_state:
@@ -199,13 +202,13 @@ else:
 # GIAO DIỆN HỌC SINH
 # ==========================================
 if user["role"] == "Học sinh":
-    st.title("🛡️ Cổng Thi Trực Tuyến - Giám Sát Nghiêm Ngặt")
+    st.title("🛡️ Cổng Thi Trực Tuyến - Giám Sát An Ninh Nghiêm Ngặt")
     
     cursor.execute("SELECT class_name FROM classes")
     all_classes = [c[0] for c in cursor.fetchall()]
     
     with st.form("student_profile_form"):
-        st.subheader("📝 Xác nhận thông tin cá nhân")
+        st.subheader("📝 Xác nhận thông tin học sinh")
         s_name = st.text_input("Họ và tên học sinh:", value=user.get("name", ""))
         s_id = st.text_input("Mã số học sinh (MSSV):", value=user.get("student_id", ""))
         s_stt = st.text_input("Số thứ tự (STT):", value=user.get("stt", ""))
@@ -271,45 +274,54 @@ if user["role"] == "Học sinh":
         q_row = cursor.fetchone()
         questions = json.loads(q_row[0])
         
-        fullscreen_script = f"""
-        <div style="padding: 15px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
-            <h3 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO</h3>
-            <p style="margin: 5px 0 0 0; font-size: 14px; color: #c62828;">
-                Hệ thống đang ở chế độ <b>Toàn màn hình</b>. Nghiêm cấm chuyển tab hoặc rời khỏi trang!
+        # --- JAVASCRIPT: TỰ ĐỘNG BẬT TOÀN MÀN HÌNH & KHÓA BÀI KHI THOÁT TAB ---
+        security_script = """
+        <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
+            <h4 style="margin: 0; color: #b71c1c;">🚨 CHẾ ĐỘ GIÁM SÁT NGHIÊM NGẶT ĐANG BẬT</h4>
+            <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
+                Hệ thống đang chạy ở chế độ <b>Toàn màn hình</b>. Nếu bạn chuyển tab hoặc thoát khỏi màn hình thi, bài làm sẽ bị <b>KHÓA NGAY LẬP TỨC</b> và báo cáo về giáo viên!
             </p>
         </div>
         <script>
-        function triggerFullscreen() {{
+        // Tự động bật toàn màn hình ngay khi tải trang
+        function forceFullscreen() {
             let elem = window.parent.document.documentElement;
-            if (elem.requestFullscreen) {{ elem.requestFullscreen(); }}
-        }}
-        let violationCount = 0;
-        document.addEventListener("visibilitychange", function() {{
-            if (document.hidden) {{
-                violationCount++;
-                alert("⚠️ CẢNH BÁO LẦN " + violationCount + ": Bạn vừa chuyển tab!");
-            }}
-        }});
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen().catch(err => { console.log(err); });
+            }
+        }
+        window.onload = forceFullscreen;
+        document.addEventListener("click", forceFullscreen);
+
+        // Phát hiện rời khỏi màn hình/tab -> Khóa bài ngay
+        let isLocked = false;
+        document.addEventListener("visibilitychange", function() {
+            if (document.hidden && !isLocked) {
+                isLocked = true;
+                alert("🚨 PHÁT HIỆN THOÁT KHỎI BÀI THI! Bài làm của bạn đã bị khóa và gửi báo cáo vi phạm về cho giáo viên.");
+                window.parent.postMessage({type: 'lock_exam'}, '*');
+                // Tự động reload hoặc chuyển trang khóa
+                window.location.reload();
+            }
+        });
+
         document.addEventListener("contextmenu", e => e.preventDefault());
-        document.addEventListener("keydown", function(e) {{
-            if (e.ctrlKey && (e.key === 'c' || e.key === 'v' || e.key === 'x' || e.key === 'u' || e.key === 'p')) {{
+        document.addEventListener("keydown", function(e) {
+            if (e.ctrlKey && (e.key === 'c' || e.key === 'v' || e.key === 'x' || e.key === 'u' || e.key === 'p')) {
                 e.preventDefault();
                 alert("⚠️ Phím tắt bị chặn!");
-            }}
-        }});
+            }
+        });
         </script>
-        <button onclick="triggerFullscreen()" style="padding: 10px 20px; background: #1976d2; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 20px;">
-            🔲 Bật Toàn Màn Hình Thi Cử
-        </button>
         """
-        components.html(fullscreen_script, height=165)
+        components.html(security_script, height=130)
         
         st.subheader(f"📖 Đề thi: {exam_title} (Thời gian: {exam_duration} phút)")
         
         with st.form("exam_submission_form"):
             user_answers = {}
             for idx, q in enumerate(questions):
-                st.markdown(f"**Câu {idx+1}:** {q['question']}")
+                st.markdown(f"**Câu {idx+1}** ({q.get('points', 1.0)} điểm): {q['question']}")
                 q_type = q.get("type", "mcq")
                 if q_type == "true_false" and q.get("statements"):
                     user_answers[str(idx)] = {}
@@ -339,6 +351,7 @@ if user["role"] == "Học sinh":
             details = []
             for idx, q in enumerate(questions):
                 q_type = q.get("type", "mcq")
+                q_pts = q.get("points", 1.0)
                 if q_type == "true_false" and q.get("statements"):
                     correct_count = 0
                     stmt_results = []
@@ -355,8 +368,10 @@ if user["role"] == "Học sinh":
                             "correct": correct_choice,
                             "is_correct": is_stmt_correct
                         })
-                    score_mapping = {0: 0.0, 1: 0.1, 2: 0.25, 3: 0.5, 4: 1.0}
-                    q_score = score_mapping.get(correct_count, 0.0)
+                    # Biểu điểm Đúng/Sai chuẩn nhân với hệ số điểm câu:
+                    # 1 ý = 0.1 | 2 ý = 0.25 | 3 ý = 0.5 | 4 ý = 1.0
+                    fraction_mapping = {0: 0.0, 1: 0.1, 2: 0.25, 3: 0.5, 4: 1.0}
+                    q_score = fraction_mapping.get(correct_count, 0.0) * q_pts
                     total_score += q_score
                     details.append({
                         "question": q['question'],
@@ -370,7 +385,7 @@ if user["role"] == "Học sinh":
                     chosen_letter = chosen[0].upper() if chosen else ""
                     correct_letter = q.get('answer', '').upper()
                     is_correct = (chosen_letter == correct_letter)
-                    q_score = 1.0 if is_correct else 0.0
+                    q_score = q_pts if is_correct else 0.0
                     total_score += q_score
                     details.append({
                         "question": q['question'],
@@ -382,8 +397,8 @@ if user["role"] == "Học sinh":
                     })
                     
             cursor.execute("""
-                INSERT INTO submissions (exam_code, student_email, student_name, student_id, stt, class_name, score, violations, submitted_at, details)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO submissions (exam_code, student_email, student_name, student_id, stt, class_name, score, violations, status, submitted_at, details)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 exam_code_input,
                 user["email"],
@@ -393,12 +408,21 @@ if user["role"] == "Học sinh":
                 user["class_name"],
                 total_score,
                 0,
+                "Hoàn thành",
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 json.dumps(details, ensure_ascii=False)
             ))
             conn.commit()
+            
+            # Kiểm tra xem giáo viên có cho phép hiện điểm không
+            cursor.execute("SELECT show_score FROM exams WHERE exam_code = ?", (exam_code_input,))
+            show_score_setting = cursor.fetchone()[0]
+            
             del st.session_state.active_exam
-            st.success(f"🎉 Nộp bài thành công! Tổng điểm của bạn: **{total_score:.2f} điểm**")
+            if show_score_setting == 1:
+                st.success(f"🎉 Nộp bài thành công! Tổng điểm của bạn: **{total_score:.2f} điểm**")
+            else:
+                st.success("🎉 Nộp bài thành công! Bài làm của bạn đã được ghi nhận vào hệ thống.")
             st.balloons()
 
 # ==========================================
@@ -409,13 +433,32 @@ elif user["role"] == "Giáo viên / Quản trị viên":
     
     t_tab1, t_tab2, t_tab3, t_tab4 = st.tabs([
         "📁 Kho Đề Thi & Tải Lên Word", 
-        "🏫 Quản Lý Lớp Học & Giao Đề", 
-        "📊 Bảng Điểm & Xuất Excel", 
+        "🏫 Quản Lý Lớp Học & Học Sinh", 
+        "📊 Bảng Điểm Theo Lớp & Xuất Excel", 
         "🔐 Cài Đặt Mật Khẩu Admin"
     ])
     
     with t_tab1:
-        st.subheader("1. Tải Lên Đề Thi Vào Kho Đề")
+        st.subheader("1. Hướng Dẫn & Mẫu Đề Thi File Word (.docx)")
+        with st.expander("📌 Xem cấu trúc mẫu file Word chuẩn để tải lên"):
+            st.markdown("""
+            **- Dạng Trắc nghiệm nhiều lựa chọn:**
+            > Câu 1: Nội dung câu hỏi...
+            > A. Lựa chọn 1
+            > B. Lựa chọn 2 *(Gạch chân đáp án đúng)*
+            > C. Lựa chọn 3
+            > D. Lựa chọn 4
+            
+            **- Dạng Đúng / Sai (Nhiều ý a, b, c, d):**
+            > Câu 2: Nội dung câu hỏi...
+            > a) Phát biểu ý a... *(Gạch chân nếu là Đúng, không gạch chân nếu là Sai)*
+            > b) Phát biểu ý b...
+            > c) Phát biểu ý c...
+            > d) Phát biểu ý d...
+            """)
+            
+        st.markdown("---")
+        st.subheader("2. Tải Lên Đề Thi Mới")
         cursor.execute("SELECT class_name FROM classes")
         cls_list = [c[0] for c in cursor.fetchall()]
         cls_choices = ["Tất cả"] + cls_list
@@ -425,6 +468,13 @@ elif user["role"] == "Giáo viên / Quản trị viên":
         up_class = st.selectbox("Giao cho lớp:", cls_choices)
         up_duration = st.number_input("Thời gian làm bài (phút):", min_value=5, max_value=180, value=45)
         up_max_attempts = st.number_input("Số lần làm bài tối đa:", min_value=1, max_value=10, value=1)
+        
+        col_pts, col_show = st.columns(2)
+        with col_pts:
+            default_q_pts = st.number_input("Điểm mặc định mỗi câu:", min_value=0.1, max_value=10.0, value=1.0)
+        with col_show:
+            show_score_to_student = st.checkbox("Hiển thị điểm cho học sinh ngay sau khi nộp bài", value=True)
+            
         up_file = st.file_uploader("Chọn file Word đề thi (.docx):", type=["docx"])
         
         if up_file and st.button("Lưu Đề Thi Vào Kho"):
@@ -433,11 +483,16 @@ elif user["role"] == "Giáo viên / Quản trị viên":
                 if not parsed_q:
                     st.error("⚠️ Không đọc được câu hỏi từ file Word.")
                 else:
+                    # Gán điểm số cho từng câu theo lựa chọn của giáo viên
+                    for q in parsed_q:
+                        q["points"] = default_q_pts
+                        
                     cursor.execute("""
-                        INSERT OR REPLACE INTO exams (exam_code, title, class_target, duration, max_attempts, questions, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        INSERT OR REPLACE INTO exams (exam_code, title, class_target, duration, max_attempts, show_score, questions, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
-                        up_code, up_title, up_class, up_duration, up_max_attempts,
+                        up_code, up_title, up_class, up_duration, up_max_attempts, 
+                        1 if show_score_to_student else 0,
                         json.dumps(parsed_q, ensure_ascii=False),
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     ))
@@ -448,18 +503,18 @@ elif user["role"] == "Giáo viên / Quản trị viên":
                 
         st.markdown("---")
         st.subheader("📚 Kho Đề Thi Hiện Có")
-        cursor.execute("SELECT exam_code, title, class_target, duration, max_attempts, created_at FROM exams")
+        cursor.execute("SELECT exam_code, title, class_target, duration, max_attempts, show_score, created_at FROM exams")
         exams_db = cursor.fetchall()
         if exams_db:
-            df_exams = pd.DataFrame(exams_db, columns=["Mã đề", "Tiêu đề", "Lớp áp dụng", "Thời gian (phút)", "Số lần thi", "Ngày tạo"])
+            df_exams = pd.DataFrame(exams_db, columns=["Mã đề", "Tiêu đề", "Lớp áp dụng", "Thời gian (phút)", "Số lần thi", "Hiện điểm", "Ngày tạo"])
             st.dataframe(df_exams, use_container_width=True)
         else:
             st.info("Kho đề thi trống.")
 
     with t_tab2:
-        st.subheader("2. Quản Lý Lớp Học")
+        st.subheader("1. Thêm Lớp Học Mới")
         new_class_name = st.text_input("Tên lớp mới (VD: 11A1, 11A2):")
-        if st.button("Thêm Lớp Học"):
+        if st.button("Thêm Lớp"):
             if new_class_name:
                 try:
                     cursor.execute("INSERT INTO classes (class_name, created_at) VALUES (?, ?)", (new_class_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
@@ -469,30 +524,59 @@ elif user["role"] == "Giáo viên / Quản trị viên":
                 except sqlite3.IntegrityError:
                     st.error("❌ Lớp học này đã tồn tại.")
                     
-        cursor.execute("SELECT class_name, created_at FROM classes")
-        cls_db = cursor.fetchall()
+        st.markdown("---")
+        st.subheader("2. Quản Lý Danh Sách Học Sinh Theo Lớp")
+        cursor.execute("SELECT class_name FROM classes")
+        cls_db = [c[0] for c in cursor.fetchall()]
+        
         if cls_db:
-            st.write("**Danh sách các lớp:**")
-            for c in cls_db:
-                st.markdown(f"- Lớp: **{c[0]}** (Tạo lúc: {c[1]})")
+            selected_manage_class = st.selectbox("Chọn lớp cần xem danh sách học sinh:", cls_db, key="manage_cls")
+            cursor.execute("SELECT stt, name, student_id, email FROM users WHERE class_name = ? AND role = 'Học sinh' ORDER BY stt", (selected_manage_class,))
+            students_in_class = cursor.fetchall()
+            
+            if students_in_class:
+                df_students = pd.DataFrame(students_in_class, columns=["STT", "Họ tên", "MSSV", "Email Google"])
+                st.dataframe(df_students, use_container_width=True)
+            else:
+                st.info(f"Chưa có học sinh nào đăng ký vào lớp {selected_manage_class}.")
+        else:
+            st.info("Chưa có lớp học nào được tạo.")
 
     with t_tab3:
-        st.subheader("3. Bảng Điểm & Xuất File Excel")
-        cursor.execute("SELECT id, exam_code, student_name, student_id, stt, class_name, score, violations, submitted_at FROM submissions")
-        subs = cursor.fetchall()
-        if subs:
-            df_subs = pd.DataFrame(subs, columns=["ID", "Mã đề", "Họ tên", "MSSV", "STT", "Lớp", "Điểm số", "Vi phạm", "Thời gian nộp"])
-            st.dataframe(df_subs, use_container_width=True)
-            csv_bytes = df_subs.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Tải Xuống Bảng Điểm (CSV/Excel)", data=csv_bytes, file_name="bang_diem_chi_tiet.csv", mime="text/csv")
+        st.subheader("📊 Quản Lý Bảng Điểm & Xuất File Excel Theo Lớp")
+        cursor.execute("SELECT class_name FROM classes")
+        cls_export_list = [c[0] for c in cursor.fetchall()]
+        
+        if cls_export_list:
+            selected_export_class = st.selectbox("Chọn lớp cần xem và xuất điểm:", cls_export_list, key="export_cls")
+            
+            cursor.execute("""
+                SELECT id, exam_code, student_name, student_id, stt, score, violations, status, submitted_at 
+                FROM submissions WHERE class_name = ?
+            """, (selected_export_class,))
+            class_subs = cursor.fetchall()
+            
+            if class_subs:
+                df_class_subs = pd.DataFrame(class_subs, columns=["ID", "Mã đề", "Họ tên", "MSSV", "STT", "Điểm số", "Vi phạm", "Trạng thái", "Thời gian nộp"])
+                st.dataframe(df_class_subs, use_container_width=True)
+                
+                csv_bytes = df_class_subs.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label=f"📥 Tải Xuống Bảng Điểm Lớp {selected_export_class} (CSV/Excel)",
+                    data=csv_bytes,
+                    file_name=f"bang_diem_lop_{selected_export_class}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.info(f"Chưa có bài nộp nào từ học sinh lớp {selected_export_class}.")
         else:
-            st.info("Chưa có học sinh nào nộp bài.")
+            st.info("Chưa có lớp học nào.")
 
     with t_tab4:
-        st.subheader("4. Đổi Mật Khẩu Quản Trị (Admin)")
+        st.subheader("🔐 Đổi Mật Khẩu Quản Trị (Admin)")
         new_pwd = st.text_input("Mật khẩu admin mới:", type="password")
         if st.button("Cập Nhật Mật Khẩu"):
             if new_pwd:
                 cursor.execute("UPDATE settings SET value = ? WHERE key = 'admin_password'", (new_pwd,))
                 conn.commit()
-                st.success("✅ Đã cập nhật mật khẩu admin thành công! Hệ thống sẽ ghi nhớ cho lần sau.")
+                st.success("✅ Đã cập nhật mật khẩu admin thành công!")
