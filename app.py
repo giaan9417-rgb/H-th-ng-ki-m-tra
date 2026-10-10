@@ -16,10 +16,8 @@ st.set_page_config(
 
 # --- KHỞI TẠO DATABASE SQLITE ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v2.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v3.db", check_same_thread=False)
     cursor = conn.cursor()
-    
-    # Bảng người dùng (Lưu thông tin Google & phân quyền)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             email TEXT PRIMARY KEY,
@@ -31,8 +29,6 @@ def init_db():
             updated_at TEXT
         )
     """)
-    
-    # Bảng kho đề thi (có thêm thời gian làm bài và số lần làm tối đa)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS exams (
             exam_code TEXT PRIMARY KEY,
@@ -44,16 +40,12 @@ def init_db():
             created_at TEXT
         )
     """)
-    
-    # Bảng lớp học
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS classes (
             class_name TEXT PRIMARY KEY,
             created_at TEXT
         )
     """)
-    
-    # Bảng kết quả bài làm
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS submissions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,20 +61,15 @@ def init_db():
             details TEXT
         )
     """)
-    
-    # Bảng cài đặt hệ thống (Mật khẩu admin, v.v.)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
         )
     """)
-    
-    # Khởi tạo mật khẩu admin mặc định nếu chưa có
     cursor.execute("SELECT value FROM settings WHERE key = 'admin_password'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO settings (key, value) VALUES ('admin_password', 'admin123')")
-        
     conn.commit()
     return conn
 
@@ -128,54 +115,87 @@ def parse_docx_to_questions(docx_file):
         questions.append(current_q)
     return questions
 
-# --- HỆ THỐNG XÁC THỰC GOOGLE & ĐĂNG NHẬP ---
+# --- HỆ THỐNG XÁC THỰC GOOGLE & ĐĂNG NHẬP THÔNG MINH ---
 st.sidebar.title("🔐 Đăng Nhập Hệ Thống")
 
 if "user" not in st.session_state:
     st.session_state.user = None
 
 if st.session_state.user is None:
-    st.sidebar.info("💡 Vui lòng đăng nhập bằng tài khoản Google của bạn.")
-    login_email = st.sidebar.text_input("Nhập email Google của bạn (@gmail.com):")
-    
-    if st.sidebar.button("Đăng Nhập Google"):
-        if not login_email or "@" not in login_email:
-            st.sidebar.error("❌ Vui lòng nhập địa chỉ email hợp lệ!")
-        else:
-            cursor = conn.cursor()
-            cursor.execute("SELECT role, name, student_id, stt, class_name FROM users WHERE email = ?", (login_email,))
-            user_row = cursor.fetchone()
-            
-            if user_row:
-                st.session_state.user = {
-                    "email": login_email,
-                    "role": user_row[0],
-                    "name": user_row[1],
-                    "student_id": user_row[2],
-                    "stt": user_row[3],
-                    "class_name": user_row[4]
-                }
-                st.rerun()
+    if "register_email" not in st.session_state:
+        st.sidebar.info("💡 Nhập email Google của bạn để tiếp tục.")
+        login_email = st.sidebar.text_input("Email Google (@gmail.com):")
+        
+        if st.sidebar.button("Tiếp tục"):
+            if not login_email or "@" not in login_email:
+                st.sidebar.error("❌ Vui lòng nhập địa chỉ email hợp lệ!")
             else:
-                # Đăng ký lần đầu, mặc định là học sinh
-                cursor.execute("INSERT INTO users (email, role, name, student_id, stt, class_name, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                               (login_email, "Học sinh", "", "", "", "", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                cursor = conn.cursor()
+                cursor.execute("SELECT role, name, student_id, stt, class_name FROM users WHERE email = ?", (login_email,))
+                user_row = cursor.fetchone()
+                
+                if user_row:
+                    # Tài khoản đã tồn tại -> Đăng nhập luôn
+                    st.session_state.user = {
+                        "email": login_email,
+                        "role": user_row[0],
+                        "name": user_row[1],
+                        "student_id": user_row[2],
+                        "stt": user_row[3],
+                        "class_name": user_row[4]
+                    }
+                    st.rerun()
+                else:
+                    # Tài khoản mới -> Chuyển sang bước chọn vai trò
+                    st.session_state.register_email = login_email
+                    st.rerun()
+    else:
+        # Giao diện chọn vai trò cho tài khoản mới đăng nhập lần đầu
+        st.sidebar.subheader(f"Tạo tài khoản mới cho:\n`{st.session_state.register_email}`")
+        selected_role = st.sidebar.selectbox("Bạn là ai?", ["Học sinh", "Giáo viên / Quản trị viên"])
+        
+        admin_pwd_input = ""
+        if selected_role == "Giáo viên / Quản trị viên":
+            admin_pwd_input = st.sidebar.text_input("Nhập mật khẩu Quản trị (Admin):", type="password")
+            
+        col_a, col_b = st.sidebar.columns(2)
+        with col_a:
+            if st.button("Xác nhận"):
+                if selected_role == "Giáo viên / Quản trị viên":
+                    cursor.execute("SELECT value FROM settings WHERE key = 'admin_password'")
+                    correct_pwd = cursor.fetchone()[0]
+                    if admin_pwd_input != correct_pwd:
+                        st.sidebar.error("❌ Mật khẩu quản trị không đúng!")
+                        st.stop()
+                        
+                cursor.execute("""
+                    INSERT INTO users (email, role, name, student_id, stt, class_name, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (st.session_state.register_email, selected_role, "", "", "", "", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                 conn.commit()
+                
                 st.session_state.user = {
-                    "email": login_email,
-                    "role": "Học sinh",
+                    "email": st.session_state.register_email,
+                    "role": selected_role,
                     "name": "",
                     "student_id": "",
                     "stt": "",
                     "class_name": ""
                 }
+                del st.session_state.register_email
+                st.rerun()
+        with col_b:
+            if st.button("Quay lại"):
+                del st.session_state.register_email
                 st.rerun()
     st.stop()
 else:
     user = st.session_state.user
-    st.sidebar.success(f"👤 Xin chào: **{user['email']}**")
+    st.sidebar.success(f"👤 Đang đăng nhập:\n**{user['email']}**\nVai trò: **{user['role']}**")
     if st.sidebar.button("Đăng xuất"):
         st.session_state.user = None
+        if "register_email" in st.session_state:
+            del st.session_state.register_email
         st.rerun()
 
 # ==========================================
@@ -184,13 +204,12 @@ else:
 if user["role"] == "Học sinh":
     st.title("🛡️ Cổng Thi Trực Tuyến - Giám Sát Nghiêm Ngặt")
     
-    # Yêu cầu cập nhật thông tin (STT, Tên, Lớp) nếu chưa có
     cursor = conn.cursor()
     cursor.execute("SELECT class_name FROM classes")
     all_classes = [c[0] for c in cursor.fetchall()]
     
     with st.form("student_profile_form"):
-        st.subheader("📝 Xác nhận thông tin học sinh")
+        st.subheader("📝 Xác nhận thông tin cá nhân")
         s_name = st.text_input("Họ và tên học sinh:", value=user.get("name", ""))
         s_id = st.text_input("Mã số học sinh (MSSV):", value=user.get("student_id", ""))
         s_stt = st.text_input("Số thứ tự (STT):", value=user.get("stt", ""))
@@ -206,7 +225,7 @@ if user["role"] == "Học sinh":
         
         if update_profile:
             if not s_name or not s_id or not s_stt or not s_class:
-                st.warning("⚠️ Vui lòng điền đầy đủ thông tin cá nhân!")
+                st.warning("⚠️ Vui lòng điền đầy đủ thông tin!")
             else:
                 cursor.execute("""
                     UPDATE users SET name = ?, student_id = ?, stt = ?, class_name = ?, updated_at = ?
@@ -217,22 +236,21 @@ if user["role"] == "Học sinh":
                 user["student_id"] = s_id
                 user["stt"] = s_stt
                 user["class_name"] = s_class
-                st.success("✅ Đã lưu thông tin thành công!")
+                st.success("✅ Đã lưu thông tin!")
                 st.rerun()
                 
     if not user["name"] or not user["class_name"]:
-        st.info("💡 Vui lòng hoàn tất thông tin cá nhân ở trên để tiếp tục làm bài.")
+        st.info("💡 Vui lòng hoàn tất thông tin cá nhân ở trên để tiếp tục.")
         st.stop()
         
     st.markdown("---")
     st.subheader(f"📚 Xin chào {user['name']} (Lớp: {user['class_name']} - STT: {user['stt']})")
     
-    # Hiển thị danh sách đề thi được giao cho lớp của học sinh
     cursor.execute("SELECT exam_code, title, duration, max_attempts FROM exams WHERE class_target = ? OR class_target = 'Tất cả'", (user["class_name"],))
     available_exams = cursor.fetchall()
     
     if not available_exams:
-        st.info("📭 Hiện tại chưa có bài kiểm tra nào được giao cho lớp của bạn.")
+        st.info("📭 Hiện chưa có bài kiểm tra nào được giao cho lớp của bạn.")
         st.stop()
         
     exam_options = {f"{e[1]} (Mã đề: {e[0]} - Thời gian: {e[2]} phút)": e for e in available_exams}
@@ -240,7 +258,6 @@ if user["role"] == "Học sinh":
     exam_info = exam_options[chosen_exam_label]
     exam_code_input, exam_title, exam_duration, max_attempts = exam_info[0], exam_info[1], exam_info[2], exam_info[3]
     
-    # Kiểm tra số lần đã làm bài
     cursor.execute("SELECT COUNT(*) FROM submissions WHERE exam_code = ? AND student_email = ?", (exam_code_input, user["email"]))
     attempts_made = cursor.fetchone()[0]
     
@@ -258,40 +275,35 @@ if user["role"] == "Học sinh":
         q_row = cursor.fetchone()
         questions = json.loads(q_row[0])
         
-        # --- JAVASCRIPT TOÀN MÀN HÌNH & CHỐNG GIAN LẬN ---
         fullscreen_script = f"""
         <div style="padding: 15px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
-            <h3 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO ĐANG HOẠT ĐỘNG</h3>
+            <h3 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO</h3>
             <p style="margin: 5px 0 0 0; font-size: 14px; color: #c62828;">
-                Hệ thống bắt buộc ở chế độ <b>Toàn màn hình</b>. Nghiêm cấm chuyển tab, thu nhỏ cửa sổ hoặc sử dụng phím tắt sao chép/dán!
+                Hệ thống đang ở chế độ <b>Toàn màn hình</b>. Nghiêm cấm chuyển tab hoặc rời khỏi trang!
             </p>
         </div>
         <script>
-        // Yêu cầu toàn màn hình tự động
         function triggerFullscreen() {{
             let elem = window.parent.document.documentElement;
-            if (elem.requestFullscreen) {{
-                elem.requestFullscreen();
-            }}
+            if (elem.requestFullscreen) {{ elem.requestFullscreen(); }}
         }}
-        
         let violationCount = 0;
         document.addEventListener("visibilitychange", function() {{
             if (document.hidden) {{
                 violationCount++;
-                alert("⚠️ CẢNH BÁO LẦN " + violationCount + ": Bạn vừa rời khỏi màn hình bài thi!");
+                alert("⚠️ CẢNH BÁO LẦN " + violationCount + ": Bạn vừa chuyển tab!");
             }}
         }});
         document.addEventListener("contextmenu", e => e.preventDefault());
         document.addEventListener("keydown", function(e) {{
             if (e.ctrlKey && (e.key === 'c' || e.key === 'v' || e.key === 'x' || e.key === 'u' || e.key === 'p')) {{
                 e.preventDefault();
-                alert("⚠️ Phím tắt sao chép/dán bị chặn!");
+                alert("⚠️ Phím tắt bị chặn!");
             }}
         }});
         </script>
         <button onclick="triggerFullscreen()" style="padding: 10px 20px; background: #1976d2; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 20px;">
-            🔲 Nhấn vào đây để bật Toàn Màn Hình Thi Cử
+            🔲 Bật Toàn Màn Hình Thi Cử
         </button>
         """
         components.html(fullscreen_script, height=165)
@@ -303,7 +315,6 @@ if user["role"] == "Học sinh":
             for idx, q in enumerate(questions):
                 st.markdown(f"**Câu {idx+1}:** {q['question']}")
                 q_type = q.get("type", "mcq")
-                
                 if q_type == "true_false" and q.get("statements"):
                     user_answers[str(idx)] = {}
                     for s_idx, stmt in enumerate(q["statements"]):
@@ -330,7 +341,6 @@ if user["role"] == "Học sinh":
         if submitted_exam:
             total_score = 0.0
             details = []
-            
             for idx, q in enumerate(questions):
                 q_type = q.get("type", "mcq")
                 if q_type == "true_false" and q.get("statements"):
@@ -398,23 +408,7 @@ if user["role"] == "Học sinh":
 # ==========================================
 # GIAO DIỆN GIÁO VIÊN / QUẢN TRỊ
 # ==========================================
-elif user["role"] == "Học sinh":
-    pass # Reserved
-else:
-    pass
-
-# Chuyển đổi vai trò sang giáo viên nếu nhập đúng mật khẩu admin
-st.sidebar.markdown("---")
-st.sidebar.subheader("👨‍🏫 Cổng Giáo Viên")
-admin_input_pass = st.sidebar.text_input("Mật khẩu Quản trị:", type="password")
-
-cursor.execute("SELECT value FROM settings WHERE key = 'admin_password'")
-saved_admin_pass = cursor.fetchone()[0]
-
-is_teacher_logged = (admin_input_pass == saved_admin_pass)
-
-# Hoặc nếu người dùng được set là giáo viên trong DB
-if user["email"] == "admin@gmail.com" or is_teacher_logged:
+elif user["role"] == "Giáo viên / Quản trị viên":
     st.title("⚙️ Cổng Quản Lý Giáo Viên & Kho Đề Thi")
     
     t_tab1, t_tab2, t_tab3, t_tab4 = st.tabs([
@@ -434,7 +428,7 @@ if user["email"] == "admin@gmail.com" or is_teacher_logged:
         up_title = st.text_input("Tiêu đề bài kiểm tra:")
         up_class = st.selectbox("Giao cho lớp:", cls_choices)
         up_duration = st.number_input("Thời gian làm bài (phút):", min_value=5, max_value=180, value=45)
-        up_max_attempts = st.number_input("Số lần làm bài tối đa cho phép:", min_value=1, max_value=10, value=1)
+        up_max_attempts = st.number_input("Số lần làm bài tối đa:", min_value=1, max_value=10, value=1)
         up_file = st.file_uploader("Chọn file Word đề thi (.docx):", type=["docx"])
         
         if up_file and st.button("Lưu Đề Thi Vào Kho"):
@@ -505,4 +499,4 @@ if user["email"] == "admin@gmail.com" or is_teacher_logged:
             if new_pwd:
                 cursor.execute("UPDATE settings SET value = ? WHERE key = 'admin_password'", (new_pwd,))
                 conn.commit()
-                st.success("✅ Đã cập nhật mật khẩu admin thành công! Hệ thống sẽ ghi nhớ cho các lần đăng nhập sau.")
+                st.success("✅ Đã cập nhật mật khẩu admin thành công! Hệ thống sẽ ghi nhớ cho lần sau.")
