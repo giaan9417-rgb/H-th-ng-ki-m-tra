@@ -74,6 +74,7 @@ def init_db():
     return conn
 
 conn = init_db()
+cursor = conn.cursor()  # Khởi tạo cursor toàn cục để dùng chung cho toàn bộ ứng dụng
 
 # --- HÀM PHÂN TÍCH FILE WORD (.DOCX) DỰA TRÊN ĐỊNH DẠNG GẠCH CHÂN ---
 def parse_docx_to_questions(docx_file):
@@ -130,12 +131,10 @@ if st.session_state.user is None:
             if not login_email or "@" not in login_email:
                 st.sidebar.error("❌ Vui lòng nhập địa chỉ email hợp lệ!")
             else:
-                cursor = conn.cursor()
                 cursor.execute("SELECT role, name, student_id, stt, class_name FROM users WHERE email = ?", (login_email,))
                 user_row = cursor.fetchone()
                 
                 if user_row:
-                    # Tài khoản đã tồn tại -> Đăng nhập luôn
                     st.session_state.user = {
                         "email": login_email,
                         "role": user_row[0],
@@ -146,11 +145,9 @@ if st.session_state.user is None:
                     }
                     st.rerun()
                 else:
-                    # Tài khoản mới -> Chuyển sang bước chọn vai trò
                     st.session_state.register_email = login_email
                     st.rerun()
     else:
-        # Giao diện chọn vai trò cho tài khoản mới đăng nhập lần đầu
         st.sidebar.subheader(f"Tạo tài khoản mới cho:\n`{st.session_state.register_email}`")
         selected_role = st.sidebar.selectbox("Bạn là ai?", ["Học sinh", "Giáo viên / Quản trị viên"])
         
@@ -204,7 +201,6 @@ else:
 if user["role"] == "Học sinh":
     st.title("🛡️ Cổng Thi Trực Tuyến - Giám Sát Nghiêm Ngặt")
     
-    cursor = conn.cursor()
     cursor.execute("SELECT class_name FROM classes")
     all_classes = [c[0] for c in cursor.fetchall()]
     
