@@ -14,9 +14,21 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- KHỞI TẠO DATABASE SQLITE (TÍCH HỢP WAL MODE CHO 35+ HỌC SINH ĐỒNG THỜI) ---
+# Custom CSS chống bôi đen và quét OCR cơ bản
+st.markdown("""
+<style>
+    body, div, p, span, h1, h2, h3, label {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- KHỞI TẠO DATABASE SQLITE (WAL MODE CHO 35+ HỌC SINH ĐỒNG THỜI) ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v8.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v9.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
@@ -121,7 +133,7 @@ def parse_docx_to_questions(docx_file):
         questions.append(current_q)
     return questions
 
-# --- XỬ LÝ KHI HỌC SINH VI PHẠM (RỜI TAB / CHIA ĐÔI MÀN HÌNH / AI) ---
+# --- XỬ LÝ KHI HỌC SINH VI PHẠM ---
 if st.query_params.get("violated") == "true":
     if "user" in st.session_state and st.session_state.user and st.session_state.user["role"] == "Học sinh":
         u = st.session_state.user
@@ -138,7 +150,7 @@ if st.query_params.get("violated") == "true":
         for key in ["active_exam", "active_exam_title", "active_exam_duration", "active_exam_questions"]:
             if key in st.session_state:
                 del st.session_state[key]
-    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Hành vi rời tab, chia đôi màn hình hoặc mở cửa sổ nổi AI đã bị ghi nhận. Bài làm đã bị khóa và báo cáo về cho giáo viên.")
+    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Hành vi rời tab, chia đôi màn hình hoặc mở trợ lý AI đã bị ghi nhận. Bài làm đã bị khóa và báo cáo về cho giáo viên.")
     if st.button("Quay lại màn hình chính"):
         st.query_params.clear()
         st.rerun()
@@ -154,7 +166,7 @@ if st.session_state.user is None:
     st.markdown("""
     <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 30px; border-radius: 12px; color: white; text-align: center; margin-bottom: 25px;">
         <h1 style="color: white; margin-bottom: 10px;">🎓 HỆ THỐNG KIỂM TRA TRỰC TUYẾN THÔNG MINH</h1>
-        <p style="font-size: 16px; opacity: 0.9;">Bảo mật tuyệt đối - Chống gian lận đa nhiệm & AI - Quét đề tự động</p>
+        <p style="font-size: 16px; opacity: 0.9;">Bảo mật tuyệt đối - Khóa bài tức thì khi gian lận - Quét đề tự động</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -314,12 +326,12 @@ if user["role"] == "Học sinh":
         exam_duration = st.session_state.active_exam_duration
         questions = st.session_state.active_exam_questions
         
-        # --- BẢO MẬT NÂNG CAO: CHỐNG CHIA ĐÔI MÀN HÌNH, TRỢ LÝ AI NỔI (GEMINI) & RỜI TAB ---
+        # --- BẢO MẬT NÂNG CAO: PHÁT ÂM THÀNH CẢNH BÁO + KHÓA MÀN HÌNH TỨC THÌ KHI GIAN LẬN ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
             <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO - CHỐNG ĐA NHIỆM & AI</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Bắt buộc Toàn màn hình. Cấm chia đôi màn hình, mở cửa sổ nổi AI (Gemini) hoặc rời tab. Vi phạm sẽ KHÓA BÀI NGAY!
+                Bắt buộc Toàn màn hình. Cấm chia đôi màn hình, mở cửa sổ nổi AI (Gemini) hoặc rời tab. Vi phạm sẽ hú còi cảnh báo và KHÓA BÀI NGAY!
             </p>
         </div>
         <script>
@@ -334,36 +346,76 @@ if user["role"] == "Học sinh":
 
         let isLocked = false;
 
-        // 1. Phát hiện mất tiêu điểm (blur) hoặc chuyển tab (visibilitychange)
-        window.addEventListener("blur", function() {
-            if (!isLocked) {
-                isLocked = true;
+        // Hàm phát âm thanh cảnh báo (Web Audio API)
+        function playAlarmSound() {
+            try {
+                let ctx = new (window.AudioContext || window.webkitAudioContext)();
+                let osc = ctx.createOscillator();
+                let gain = ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(800, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 1.0);
+                gain.gain.setValueAtTime(1, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.0);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 1.0);
+            } catch(e) {}
+        }
+
+        // Hàm khóa màn hình tức thì
+        function triggerLockdown() {
+            if (isLocked) return;
+            isLocked = true;
+            playAlarmSound();
+
+            // Tạo khung đỏ phủ kín toàn bộ trang web ngay lập tức
+            let overlay = window.parent.document.createElement('div');
+            overlay.style.position = 'fixed';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100vw';
+            overlay.style.height = '100vh';
+            overlay.style.backgroundColor = '#b71c1c';
+            overlay.style.color = 'white';
+            overlay.style.zIndex = '9999999';
+            overlay.style.display = 'flex';
+            overlay.style.flexDirection = 'column';
+            overlay.style.justifyContent = 'center';
+            overlay.style.alignItems = 'center';
+            overlay.style.fontFamily = 'sans-serif';
+            overlay.innerHTML = '<h1 style="font-size: 2.5rem; margin-bottom: 20px; text-align: center;">🚨 PHÁT HIỆN GIAN LẬN / RỜI BÀI THI!</h1><p style="font-size: 1.3rem; text-align: center; padding: 0 20px;">Hệ thống đã khóa bài thi và ghi nhận vi phạm về cho giáo viên.</p>';
+            window.parent.document.body.appendChild(overlay);
+
+            setTimeout(function() {
                 let currentUrl = window.parent.location.href.split('?')[0];
                 window.parent.location.href = currentUrl + "?violated=true";
-            }
+            }, 1800);
+        }
+
+        // 1. Phát hiện mất tiêu điểm (blur) hoặc chuyển tab (visibilitychange)
+        window.addEventListener("blur", function() {
+            triggerLockdown();
         });
 
         document.addEventListener("visibilitychange", function() {
-            if (document.hidden && !isLocked) {
-                isLocked = true;
-                let currentUrl = window.parent.location.href.split('?')[0];
-                window.parent.location.href = currentUrl + "?violated=true";
+            if (document.hidden) {
+                triggerLockdown();
             }
         });
 
-        // 2. Phát hiện thay đổi kích thước khung hình đột ngột (hành vi chia đôi màn hình / mở app nổi AI)
+        // 2. Phát hiện thay đổi kích thước khung hình đột ngột (chia đôi màn hình / mở app nổi AI)
         let initialWidth = window.innerWidth;
         window.addEventListener("resize", function() {
-            if (Math.abs(window.innerWidth - initialWidth) > 180 && !isLocked) {
-                isLocked = true;
-                let currentUrl = window.parent.location.href.split('?')[0];
-                window.parent.location.href = currentUrl + "?violated=true";
+            if (Math.abs(window.innerWidth - initialWidth) > 150) {
+                triggerLockdown();
             }
         });
 
         document.addEventListener("contextmenu", e => e.preventDefault());
         document.addEventListener("keydown", function(e) {
-            if (e.ctrlKey || e.metaKey) {
+            if (e.ctrlKey || e.metaKey || e.key === 'F12') {
                 e.preventDefault();
             }
         });
@@ -648,7 +700,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
         if violations_db:
             df_violations = pd.DataFrame(violations_db, columns=["ID", "Mã đề", "Họ tên", "MSSV", "STT", "Lớp", "Trạng thái vi phạm", "Thời gian ghi nhận"])
             st.dataframe(df_violations, use_container_width=True)
-            st.warning("⚠️ Những học sinh có tên trong danh sách trên đã thực hiện hành vi rời khỏi tab, chia đôi màn hình hoặc bật cửa sổ nổi trợ lý AI trong lúc làm bài!")
+            st.warning("⚠️ Những học sinh có tên trong danh sách trên đã thực hiện hành vi rời khỏi tab, chia đôi màn hình hoặc mở trợ lý AI trong lúc làm bài!")
         else:
             st.success("🎉 Tuyệt vời! Chưa có học sinh nào vi phạm quy chế trong đợt kiểm tra này.")
 
