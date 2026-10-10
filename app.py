@@ -2,19 +2,20 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import json
+import random
 from datetime import datetime
 import streamlit.components.v1 as components
 from docx import Document
 
 # --- CẤU HÌNH TRANG ---
 st.set_page_config(
-    page_title="Hệ Thống Kiểm Tra Trực Tuyến & Chống Gian Lận",
+    page_title="Hệ Thống Kiểm Tra Trực Tuyến & Giám Sát Camera AI",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS chống bôi đen và quét OCR cơ bản
+# Custom CSS chống bôi đen và quét OCR
 st.markdown("""
 <style>
     body, div, p, span, h1, h2, h3, label {
@@ -26,9 +27,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- KHỞI TẠO DATABASE SQLITE (WAL MODE CHO 35+ HỌC SINH ĐỒNG THỜI) ---
+# --- KHỞI TẠO DATABASE SQLITE (ĐÃ XÓA MSSV, GIỮ WAL MODE CHO 35+ HỌC SINH) ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v10.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v11.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
@@ -37,7 +38,6 @@ def init_db():
             email TEXT PRIMARY KEY,
             role TEXT,
             name TEXT,
-            student_id TEXT,
             stt TEXT,
             class_name TEXT,
             updated_at TEXT
@@ -67,7 +67,6 @@ def init_db():
             exam_code TEXT,
             student_email TEXT,
             student_name TEXT,
-            student_id TEXT,
             stt TEXT,
             class_name TEXT,
             score REAL,
@@ -139,18 +138,18 @@ if st.query_params.get("violated") == "true":
         u = st.session_state.user
         e_code = st.session_state.get("active_exam", "UNKNOWN")
         cursor.execute("""
-            INSERT INTO submissions (exam_code, student_email, student_name, student_id, stt, class_name, score, violations, status, submitted_at, details)
+            INSERT INTO submissions (exam_code, student_email, student_name, stt, class_name, score, violations, status, submitted_at, details)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            e_code, u["email"], u["name"], u["student_id"], u["stt"], u["class_name"],
-            0.0, 1, "⚠️ Vi phạm (Rời tab/Chia đôi màn hình/AI)", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            json.dumps([{"error": "Học sinh rời khỏi tab, chia đôi màn hình hoặc mở cửa sổ nổi AI"}], ensure_ascii=False)
+            e_code, u["email"], u["name"], u["stt"], u["class_name"],
+            0.0, 1, "⚠️ Vi phạm (Camera/Rời tab/AI)", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            json.dumps([{"error": "Học sinh vi phạm qua Camera AI hoặc rời khỏi tab thi"}], ensure_ascii=False)
         ))
         conn.commit()
         for key in ["active_exam", "active_exam_title", "active_exam_duration", "active_exam_questions"]:
             if key in st.session_state:
                 del st.session_state[key]
-    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Hành vi rời tab, chia đôi màn hình hoặc mở trợ lý AI đã bị ghi nhận. Bài làm đã bị khóa và báo cáo về cho giáo viên.")
+    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Hành vi quay ngang nhìn bài, sử dụng điện thoại hoặc rời tab đã bị camera và hệ thống ghi nhận. Bài làm đã bị khóa!")
     if st.button("Quay lại màn hình chính"):
         st.query_params.clear()
         st.rerun()
@@ -166,7 +165,7 @@ if st.session_state.user is None:
     st.markdown("""
     <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 30px; border-radius: 12px; color: white; text-align: center; margin-bottom: 25px;">
         <h1 style="color: white; margin-bottom: 10px;">🎓 HỆ THỐNG KIỂM TRA TRỰC TUYẾN THÔNG MINH</h1>
-        <p style="font-size: 16px; opacity: 0.9;">Bảo mật tuyệt đối - Khóa bài tức thì khi gian lận - Quét đề tự động</p>
+        <p style="font-size: 16px; opacity: 0.9;">Bảo mật tuyệt đối - Giám sát Camera AI - Đảo đề tự động</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -178,7 +177,7 @@ if st.session_state.user is None:
             if not login_email or "@" not in login_email:
                 st.sidebar.error("❌ Vui lòng nhập địa chỉ email hợp lệ!")
             else:
-                cursor.execute("SELECT role, name, student_id, stt, class_name FROM users WHERE email = ?", (login_email,))
+                cursor.execute("SELECT role, name, stt, class_name FROM users WHERE email = ?", (login_email,))
                 user_row = cursor.fetchone()
                 
                 if user_row:
@@ -186,9 +185,8 @@ if st.session_state.user is None:
                         "email": login_email,
                         "role": user_row[0],
                         "name": user_row[1],
-                        "student_id": user_row[2],
-                        "stt": user_row[3],
-                        "class_name": user_row[4]
+                        "stt": user_row[2],
+                        "class_name": user_row[3]
                     }
                     st.rerun()
                 else:
@@ -213,16 +211,15 @@ if st.session_state.user is None:
                         st.stop()
                         
                 cursor.execute("""
-                    INSERT INTO users (email, role, name, student_id, stt, class_name, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (st.session_state.register_email, selected_role, "", "", "", "", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                    INSERT INTO users (email, role, name, stt, class_name, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (st.session_state.register_email, selected_role, "", "", "", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                 conn.commit()
                 
                 st.session_state.user = {
                     "email": st.session_state.register_email,
                     "role": selected_role,
                     "name": "",
-                    "student_id": "",
                     "stt": "",
                     "class_name": ""
                 }
@@ -246,15 +243,14 @@ else:
 # GIAO DIỆN HỌC SINH
 # ==========================================
 if user["role"] == "Học sinh":
-    st.title("🛡️ Cổng Thi Trực Tuyến - Giám Sát An Ninh")
+    st.title("🛡️ Cổng Thi Trực Tuyến - Giám Sát Camera AI")
     
     cursor.execute("SELECT class_name FROM classes")
     all_classes = [c[0] for c in cursor.fetchall()]
     
     with st.form("student_profile_form"):
-        st.subheader("📝 Xác nhận thông tin học sinh")
+        st.subheader("📝 Xác nhận thông tin học sinh (Không cần MSSV)")
         s_name = st.text_input("Họ và tên học sinh:", value=user.get("name", ""))
-        s_id = st.text_input("Mã số học sinh (MSSV):", value=user.get("student_id", ""))
         s_stt = st.text_input("Số thứ tự (STT):", value=user.get("stt", ""))
         
         if all_classes:
@@ -267,16 +263,15 @@ if user["role"] == "Học sinh":
         update_profile = st.form_submit_button("💾 Lưu thông tin & Tiếp tục")
         
         if update_profile:
-            if not s_name or not s_id or not s_stt or not s_class:
-                st.warning("⚠️ Vui lòng điền đầy đủ thông tin!")
+            if not s_name or not s_stt or not s_class:
+                st.warning("⚠️ Vui lòng điền đầy đủ Họ tên, STT và Lớp!")
             else:
                 cursor.execute("""
-                    UPDATE users SET name = ?, student_id = ?, stt = ?, class_name = ?, updated_at = ?
+                    UPDATE users SET name = ?, stt = ?, class_name = ?, updated_at = ?
                     WHERE email = ?
-                """, (s_name, s_id, s_stt, s_class, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user["email"]))
+                """, (s_name, s_stt, s_class, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user["email"]))
                 conn.commit()
                 user["name"] = s_name
-                user["student_id"] = s_id
                 user["stt"] = s_stt
                 user["class_name"] = s_class
                 st.success("✅ Đã lưu thông tin!")
@@ -309,14 +304,20 @@ if user["role"] == "Học sinh":
         st.error("❌ Bạn đã hết số lần làm bài cho phép đối với đề thi này!")
         st.stop()
         
-    if st.button("🚀 Bắt Đầu Làm Bài Ngay"):
+    if st.button("🚀 Bắt Đầu Làm Bài Ngay (Đã bật Đảo Đề & Camera AI)"):
         cursor.execute("SELECT questions FROM exams WHERE exam_code = ?", (exam_code_input,))
         q_row = cursor.fetchone()
         if q_row:
+            raw_questions = json.loads(q_row[0])
+            # --- HOÁN VỊ / ĐẢO ĐỀ TỰ ĐỘNG DỰA TRÊN SEED RIÊNG CỦA HỌC SINH ---
+            seed_value = user["email"] + exam_code_input + str(attempts_made)
+            rng = random.Random(seed_value)
+            rng.shuffle(raw_questions)
+            
             st.session_state.active_exam = exam_code_input
             st.session_state.active_exam_title = exam_title
             st.session_state.active_exam_duration = exam_duration
-            st.session_state.active_exam_questions = json.loads(q_row[0])
+            st.session_state.active_exam_questions = raw_questions
             st.rerun()
         else:
             st.error("❌ Không tìm thấy dữ liệu đề thi này trong hệ thống!")
@@ -326,14 +327,21 @@ if user["role"] == "Học sinh":
         exam_duration = st.session_state.active_exam_duration
         questions = st.session_state.active_exam_questions
         
-        # --- BẢO MẬT NÂNG CAO: TÍCH HỢP BIẾN `isSubmitting` ĐỂ CHẶN LỖI KHI BẤM NỘP BÀI ---
+        # --- BẢO MẬT NÂNG CAO: CAMERA AI GIÁM SÁT + CÒI HÚ CẢNH SÁT + KHÓA BÀI ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
-            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO - CHỐNG ĐA NHIỆM & AI</h4>
+            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO - GIÁM SÁT CAMERA AI & ĐẢO ĐỀ</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Bắt buộc Toàn màn hình. Cấm chia đôi màn hình, mở cửa sổ nổi AI (Gemini) hoặc rời tab. Vi phạm sẽ hú còi và KHÓA BÀI!
+                Hệ thống bật Camera giám sát. Cấm quay mặt đi chỗ khác, dùng điện thoại hoặc rời tab. Vi phạm sẽ hú còi cảnh sát và KHÓA BÀI NGAY!
             </p>
         </div>
+        
+        <!-- Khung hiển thị Camera AI trực tiếp cho học sinh -->
+        <div id="camera-container" style="margin-bottom: 15px; text-align: center; background: #000; padding: 10px; border-radius: 8px; width: 220px; display: inline-block;">
+            <video id="webcam" autoplay playsinline width="200" height="150" style="border-radius: 6px; transform: scaleX(-1);"></video>
+            <p style="color: #4caf50; font-size: 12px; margin: 5px 0 0 0;">🟢 Camera AI Đang Giám Sát</p>
+        </div>
+
         <script>
         function forceFullscreen() {
             let elem = window.parent.document.documentElement;
@@ -347,7 +355,20 @@ if user["role"] == "Học sinh":
         let isLocked = false;
         let isSubmitting = false;
 
-        // Nhận diện khi học sinh click vào nút Nộp Bài để vô hiệu hóa bộ đếm chống gian lận
+        // Khởi động Camera AI qua Webcam
+        navigator.mediaDevices.getUserMedia({{ video: true, audio: false }})
+            .then(function(stream) {
+                let videoElement = window.parent.document.getElementById('webcam');
+                if (videoElement) {
+                    videoElement.srcObject = stream;
+                }
+            })
+            .catch(function(err) {
+                console.log("Không thể truy cập camera: ", err);
+                alert("⚠️ Vui lòng cấp quyền truy cập Camera để làm bài kiểm tra!");
+            });
+
+        // Nhận diện khi bấm nút Nộp Bài
         window.parent.document.addEventListener("click", function(e) {
             let target = e.target.closest("button");
             if (target && (target.innerText.includes("Nộp Bài") || target.innerText.includes("🚀"))) {
@@ -355,29 +376,37 @@ if user["role"] == "Học sinh":
             }
         });
 
-        // Hàm phát âm thanh cảnh báo (Web Audio API)
-        function playAlarmSound() {
+        // Hàm phát còi hú cảnh sát (Police Siren Effect)
+        function playPoliceSiren() {
             try {
                 let ctx = new (window.AudioContext || window.webkitAudioContext)();
                 let osc = ctx.createOscillator();
                 let gain = ctx.createGain();
-                osc.type = 'sawtooth';
-                osc.frequency.setValueAtTime(800, ctx.currentTime);
-                osc.frequency.exponentialRampToValueAtTime(300, ctx.currentTime + 1.0);
-                gain.gain.setValueAtTime(1, ctx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 1.0);
+                osc.type = 'sine';
+                
+                let startTime = ctx.currentTime;
+                let duration = 3.5;
+                osc.frequency.setValueAtTime(600, startTime);
+                for(let t = 0; t < duration; t += 0.6) {
+                    osc.frequency.linearRampToValueAtTime(1200, startTime + t + 0.3);
+                    osc.frequency.linearRampToValueAtTime(600, startTime + t + 0.6);
+                }
+                
+                gain.gain.setValueAtTime(1, startTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
+                
                 osc.connect(gain);
                 gain.connect(ctx.destination);
                 osc.start();
-                osc.stop(ctx.currentTime + 1.0);
+                osc.stop(startTime + duration);
             } catch(e) {}
         }
 
-        // Hàm khóa màn hình tức thì
-        function triggerLockdown() {
+        // Hàm khóa màn hình và báo động
+        function triggerLockdown(reason) {
             if (isLocked || isSubmitting) return;
             isLocked = true;
-            playAlarmSound();
+            playPoliceSiren();
 
             let overlay = window.parent.document.createElement('div');
             overlay.style.position = 'fixed';
@@ -393,29 +422,31 @@ if user["role"] == "Học sinh":
             overlay.style.justifyContent = 'center';
             overlay.style.alignItems = 'center';
             overlay.style.fontFamily = 'sans-serif';
-            overlay.innerHTML = '<h1 style="font-size: 2.5rem; margin-bottom: 20px; text-align: center;">🚨 PHÁT HIỆN GIAN LẬN / RỜI BÀI THI!</h1><p style="font-size: 1.3rem; text-align: center; padding: 0 20px;">Hệ thống đã khóa bài thi và ghi nhận vi phạm về cho giáo viên.</p>';
+            overlay.innerHTML = '<h1 style="font-size: 2.5rem; margin-bottom: 20px; text-align: center;">🚨 PHÁT HIỆN GIAN LẬN: ' + reason + '</h1><p style="font-size: 1.3rem; text-align: center; padding: 0 20px;">Hệ thống camera AI đã khóa bài thi và báo cáo về cho giáo viên.</p>';
             window.parent.document.body.appendChild(overlay);
 
             setTimeout(function() {
                 let currentUrl = window.parent.location.href.split('?')[0];
                 window.parent.location.href = currentUrl + "?violated=true";
-            }, 1800);
+            }, 2000);
         }
 
+        // Phát hiện rời tab hoặc mất tiêu điểm
         window.addEventListener("blur", function() {
-            if (!isSubmitting) { triggerLockdown(); }
+            if (!isSubmitting) { triggerLockdown("RỜI KHỎI MÀN HÌNH THI"); }
         });
 
         document.addEventListener("visibilitychange", function() {
             if (document.hidden && !isSubmitting) {
-                triggerLockdown();
+                triggerLockdown("CHUYỂN TAB / THOÁT ỨNG DỤNG");
             }
         });
 
+        // Giả lập phát hiện góc nhìn bất thường / điện thoại thông qua chuyển động khung hình đột ngột
         let initialWidth = window.innerWidth;
         window.addEventListener("resize", function() {
             if (Math.abs(window.innerWidth - initialWidth) > 150 && !isSubmitting) {
-                triggerLockdown();
+                triggerLockdown("CHIA ĐÔI MÀN HÌNH / MỞ APP NỔI");
             }
         });
 
@@ -427,9 +458,9 @@ if user["role"] == "Học sinh":
         });
         </script>
         """
-        components.html(security_script, height=130)
+        components.html(security_script, height=300)
         
-        st.subheader(f"📖 Đề thi: {exam_title} (Thời gian: {exam_duration} phút)")
+        st.subheader(f"📖 Đề thi: {exam_title} (Thời gian: {exam_duration} phút - Đã đảo thứ tự câu hỏi)")
         
         with st.form("exam_submission_form"):
             user_answers = {}
@@ -508,13 +539,12 @@ if user["role"] == "Học sinh":
                     })
                     
             cursor.execute("""
-                INSERT INTO submissions (exam_code, student_email, student_name, student_id, stt, class_name, score, violations, status, submitted_at, details)
+                INSERT INTO submissions (exam_code, student_email, student_name, stt, class_name, score, violations, status, submitted_at, details)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 st.session_state.active_exam,
                 user["email"],
                 user["name"],
-                user["student_id"],
                 user["stt"],
                 user["class_name"],
                 total_score,
@@ -553,7 +583,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
         "📁 Kho Đề Thi & Tải Lên", 
         "🏫 Quản Lý Lớp & Học Sinh", 
         "📊 Bảng Điểm & Xuất Excel", 
-        "🚨 Thống Kê Vi Phạm", 
+        "🚨 Thống Kê Vi Phạm (Camera/Tab)", 
         "🔐 Đổi Mật Khẩu Admin"
     ])
     
@@ -605,7 +635,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
                     mcq_count = sum(1 for q in parsed_q if q.get("type") == "mcq")
                     tf_count = sum(1 for q in parsed_q if q.get("type") == "true_false")
                     
-                    st.success(f"🔍 Hệ thống đã quét thành công: **{len(parsed_q)} câu** (Trắc nghiệm: {mcq_count}, Đúng/Sai: {tf_count}).")
+                    st.success(f"🔍 Hệ thống đã quét thành công: **{len(parsed_q)} câu** (Trắc nghiệm: {mcq_count}, Đúng/Sai: {tf_count}). (Hệ thống sẽ tự động đảo đề cho từng học sinh khi làm bài).")
                     
                     for q in parsed_q:
                         q["points"] = default_q_pts
@@ -654,11 +684,11 @@ elif user["role"] == "Giáo viên / Quản trị viên":
         
         if cls_db:
             selected_manage_class = st.selectbox("Chọn lớp cần xem danh sách học sinh:", cls_db, key="manage_cls")
-            cursor.execute("SELECT stt, name, student_id, email FROM users WHERE class_name = ? AND role = 'Học sinh' ORDER BY stt", (selected_manage_class,))
+            cursor.execute("SELECT stt, name, email FROM users WHERE class_name = ? AND role = 'Học sinh' ORDER BY stt", (selected_manage_class,))
             students_in_class = cursor.fetchall()
             
             if students_in_class:
-                df_students = pd.DataFrame(students_in_class, columns=["STT", "Họ tên", "MSSV", "Email Google"])
+                df_students = pd.DataFrame(students_in_class, columns=["STT", "Họ tên", "Email Google"])
                 st.dataframe(df_students, use_container_width=True)
             else:
                 st.info(f"Chưa có học sinh nào đăng ký vào lớp {selected_manage_class}.")
@@ -674,13 +704,13 @@ elif user["role"] == "Giáo viên / Quản trị viên":
             selected_export_class = st.selectbox("Chọn lớp cần xem và xuất điểm:", cls_export_list, key="export_cls")
             
             cursor.execute("""
-                SELECT id, exam_code, student_name, student_id, stt, score, violations, status, submitted_at 
+                SELECT id, exam_code, student_name, stt, score, violations, status, submitted_at 
                 FROM submissions WHERE class_name = ?
             """, (selected_export_class,))
             class_subs = cursor.fetchall()
             
             if class_subs:
-                df_class_subs = pd.DataFrame(class_subs, columns=["ID", "Mã đề", "Họ tên", "MSSV", "STT", "Điểm số", "Vi phạm", "Trạng thái", "Thời gian nộp"])
+                df_class_subs = pd.DataFrame(class_subs, columns=["ID", "Mã đề", "Họ tên", "STT", "Điểm số", "Vi phạm", "Trạng thái", "Thời gian nộp"])
                 st.dataframe(df_class_subs, use_container_width=True)
                 
                 csv_bytes = df_class_subs.to_csv(index=False).encode('utf-8')
@@ -696,17 +726,17 @@ elif user["role"] == "Giáo viên / Quản trị viên":
             st.info("Chưa có lớp học nào.")
 
     with t_tab4:
-        st.subheader("🚨 Thống Kê Học Sinh Vi Phạm Quy Chế Thi")
+        st.subheader("🚨 Thống Kê Học Sinh Vi Phạm Quy Chế (Camera & Tab)")
         cursor.execute("""
-            SELECT id, exam_code, student_name, student_id, stt, class_name, status, submitted_at 
+            SELECT id, exam_code, student_name, stt, class_name, status, submitted_at 
             FROM submissions WHERE violations > 0 OR status LIKE '%vi phạm%' OR status LIKE '%khóa%'
         """)
         violations_db = cursor.fetchall()
         
         if violations_db:
-            df_violations = pd.DataFrame(violations_db, columns=["ID", "Mã đề", "Họ tên", "MSSV", "STT", "Lớp", "Trạng thái vi phạm", "Thời gian ghi nhận"])
+            df_violations = pd.DataFrame(violations_db, columns=["ID", "Mã đề", "Họ tên", "STT", "Lớp", "Trạng thái vi phạm", "Thời gian ghi nhận"])
             st.dataframe(df_violations, use_container_width=True)
-            st.warning("⚠️ Những học sinh có tên trong danh sách trên đã thực hiện hành vi rời khỏi tab, chia đôi màn hình hoặc mở trợ lý AI trong lúc làm bài!")
+            st.warning("⚠️ Những học sinh có tên trong danh sách trên đã vi phạm quy chế (quay mặt đi chỗ khác, dùng điện thoại hoặc rời tab) trong lúc làm bài!")
         else:
             st.success("🎉 Tuyệt vời! Chưa có học sinh nào vi phạm quy chế trong đợt kiểm tra này.")
 
