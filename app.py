@@ -27,9 +27,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- KHỞI TẠO DATABASE SQLITE (ĐÃ XÓA MSSV, GIỮ WAL MODE CHO 35+ HỌC SINH) ---
+# --- KHỞI TẠO DATABASE SQLITE (DÙNG v12 ĐỂ TRÁNH XUNG ĐỘT BẢNG CŨ) ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v11.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v12.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
@@ -139,7 +139,7 @@ if st.query_params.get("violated") == "true":
         e_code = st.session_state.get("active_exam", "UNKNOWN")
         cursor.execute("""
             INSERT INTO submissions (exam_code, student_email, student_name, stt, class_name, score, violations, status, submitted_at, details)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             e_code, u["email"], u["name"], u["stt"], u["class_name"],
             0.0, 1, "⚠️ Vi phạm (Camera/Rời tab/AI)", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -249,7 +249,7 @@ if user["role"] == "Học sinh":
     all_classes = [c[0] for c in cursor.fetchall()]
     
     with st.form("student_profile_form"):
-        st.subheader("📝 Xác nhận thông tin học sinh (Không cần MSSV)")
+        st.subheader("📝 Xác nhận thông tin học sinh")
         s_name = st.text_input("Họ và tên học sinh:", value=user.get("name", ""))
         s_stt = st.text_input("Số thứ tự (STT):", value=user.get("stt", ""))
         
@@ -327,16 +327,15 @@ if user["role"] == "Học sinh":
         exam_duration = st.session_state.active_exam_duration
         questions = st.session_state.active_exam_questions
         
-        # --- BẢO MẬT NÂNG CAO: CAMERA AI GIÁM SÁT + CÒI HÚ CẢNH SÁT + KHÓA BÀI ---
+        # --- BẢO MẬT NÂNG CAO: CAMERA AI + CÒI CẢNH SÁT + ĐẢO ĐỀ + CHO PHÉP CAMERA HOẠT ĐỘNG QUA ALLOW ATTRIBUTE ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
             <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO - GIÁM SÁT CAMERA AI & ĐẢO ĐỀ</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Hệ thống bật Camera giám sát. Cấm quay mặt đi chỗ khác, dùng điện thoại hoặc rời tab. Vi phạm sẽ hú còi cảnh sát và KHÓA BÀI NGAY!
+                Camera đang hoạt động. Cấm quay mặt đi chỗ khác, dùng điện thoại hoặc rời tab. Vi phạm sẽ hú còi cảnh sát và KHÓA BÀI NGAY!
             </p>
         </div>
         
-        <!-- Khung hiển thị Camera AI trực tiếp cho học sinh -->
         <div id="camera-container" style="margin-bottom: 15px; text-align: center; background: #000; padding: 10px; border-radius: 8px; width: 220px; display: inline-block;">
             <video id="webcam" autoplay playsinline width="200" height="150" style="border-radius: 6px; transform: scaleX(-1);"></video>
             <p style="color: #4caf50; font-size: 12px; margin: 5px 0 0 0;">🟢 Camera AI Đang Giám Sát</p>
@@ -355,8 +354,8 @@ if user["role"] == "Học sinh":
         let isLocked = false;
         let isSubmitting = false;
 
-        // Khởi động Camera AI qua Webcam
-        navigator.mediaDevices.getUserMedia({{ video: true, audio: false }})
+        // Kích hoạt camera
+        navigator.mediaDevices.getUserMedia({ video: true, audio: false })
             .then(function(stream) {
                 let videoElement = window.parent.document.getElementById('webcam');
                 if (videoElement) {
@@ -364,11 +363,9 @@ if user["role"] == "Học sinh":
                 }
             })
             .catch(function(err) {
-                console.log("Không thể truy cập camera: ", err);
-                alert("⚠️ Vui lòng cấp quyền truy cập Camera để làm bài kiểm tra!");
+                console.log("Lỗi camera: ", err);
             });
 
-        // Nhận diện khi bấm nút Nộp Bài
         window.parent.document.addEventListener("click", function(e) {
             let target = e.target.closest("button");
             if (target && (target.innerText.includes("Nộp Bài") || target.innerText.includes("🚀"))) {
@@ -376,7 +373,6 @@ if user["role"] == "Học sinh":
             }
         });
 
-        // Hàm phát còi hú cảnh sát (Police Siren Effect)
         function playPoliceSiren() {
             try {
                 let ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -402,7 +398,6 @@ if user["role"] == "Học sinh":
             } catch(e) {}
         }
 
-        // Hàm khóa màn hình và báo động
         function triggerLockdown(reason) {
             if (isLocked || isSubmitting) return;
             isLocked = true;
@@ -431,7 +426,6 @@ if user["role"] == "Học sinh":
             }, 2000);
         }
 
-        // Phát hiện rời tab hoặc mất tiêu điểm
         window.addEventListener("blur", function() {
             if (!isSubmitting) { triggerLockdown("RỜI KHỎI MÀN HÌNH THI"); }
         });
@@ -442,7 +436,6 @@ if user["role"] == "Học sinh":
             }
         });
 
-        // Giả lập phát hiện góc nhìn bất thường / điện thoại thông qua chuyển động khung hình đột ngột
         let initialWidth = window.innerWidth;
         window.addEventListener("resize", function() {
             if (Math.abs(window.innerWidth - initialWidth) > 150 && !isSubmitting) {
@@ -458,7 +451,8 @@ if user["role"] == "Học sinh":
         });
         </script>
         """
-        components.html(security_script, height=300)
+        # Cấp quyền camera và microphone cho iframe component
+        components.html(security_script, height=300, allow="camera; microphone")
         
         st.subheader(f"📖 Đề thi: {exam_title} (Thời gian: {exam_duration} phút - Đã đảo thứ tự câu hỏi)")
         
@@ -540,7 +534,7 @@ if user["role"] == "Học sinh":
                     
             cursor.execute("""
                 INSERT INTO submissions (exam_code, student_email, student_name, stt, class_name, score, violations, status, submitted_at, details)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 st.session_state.active_exam,
                 user["email"],
@@ -583,7 +577,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
         "📁 Kho Đề Thi & Tải Lên", 
         "🏫 Quản Lý Lớp & Học Sinh", 
         "📊 Bảng Điểm & Xuất Excel", 
-        "🚨 Thống Kê Vi Phạm (Camera/Tab)", 
+        "🚨 Thống Kê Vi Phạm", 
         "🔐 Đổi Mật Khẩu Admin"
     ])
     
@@ -635,7 +629,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
                     mcq_count = sum(1 for q in parsed_q if q.get("type") == "mcq")
                     tf_count = sum(1 for q in parsed_q if q.get("type") == "true_false")
                     
-                    st.success(f"🔍 Hệ thống đã quét thành công: **{len(parsed_q)} câu** (Trắc nghiệm: {mcq_count}, Đúng/Sai: {tf_count}). (Hệ thống sẽ tự động đảo đề cho từng học sinh khi làm bài).")
+                    st.success(f"🔍 Hệ thống đã quét thành công: **{len(parsed_q)} câu** (Trắc nghiệm: {mcq_count}, Đúng/Sai: {tf_count}).")
                     
                     for q in parsed_q:
                         q["points"] = default_q_pts
