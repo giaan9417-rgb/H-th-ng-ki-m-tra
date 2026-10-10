@@ -5,6 +5,7 @@ import json
 import random
 from datetime import datetime
 import streamlit.components.v1 as components
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from docx import Document
 
 # --- CẤU HÌNH TRANG ---
@@ -27,9 +28,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- KHỞI TẠO DATABASE SQLITE (DÙNG v12 ĐỂ TRÁNH XUNG ĐỘT BẢNG CŨ) ---
+# --- KHỞI TẠO DATABASE SQLITE (WAL MODE CHO 35+ HỌC SINH ĐỒNG THỜI) ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v12.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v14.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
@@ -142,14 +143,14 @@ if st.query_params.get("violated") == "true":
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             e_code, u["email"], u["name"], u["stt"], u["class_name"],
-            0.0, 1, "⚠️ Vi phạm (Camera/Rời tab/AI)", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            json.dumps([{"error": "Học sinh vi phạm qua Camera AI hoặc rời khỏi tab thi"}], ensure_ascii=False)
+            0.0, 1, "⚠️ Vi phạm (Rời tab/Chia đôi màn hình)", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            json.dumps([{"error": "Học sinh rời khỏi tab hoặc chuyển đổi màn hình trong lúc thi"}], ensure_ascii=False)
         ))
         conn.commit()
         for key in ["active_exam", "active_exam_title", "active_exam_duration", "active_exam_questions"]:
             if key in st.session_state:
                 del st.session_state[key]
-    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Hành vi quay ngang nhìn bài, sử dụng điện thoại hoặc rời tab đã bị camera và hệ thống ghi nhận. Bài làm đã bị khóa!")
+    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Hành vi rời tab hoặc chuyển đổi màn hình đã bị ghi nhận. Bài làm đã bị khóa!")
     if st.button("Quay lại màn hình chính"):
         st.query_params.clear()
         st.rerun()
@@ -327,20 +328,23 @@ if user["role"] == "Học sinh":
         exam_duration = st.session_state.active_exam_duration
         questions = st.session_state.active_exam_questions
         
-        # --- BẢO MẬT NÂNG CAO: CAMERA AI + CÒI CẢNH SÁT + ĐẢO ĐỀ + CHO PHÉP CAMERA HOẠT ĐỘNG QUA ALLOW ATTRIBUTE ---
+        # --- HIỂN THỊ CAMERA CHÍNH THỨC QUA STREAMLIT-WEBRTC ---
+        st.markdown("📷 **Camera Giám Sát Khuôn Mặt (Bắt buộc bật để làm bài):**")
+        webrtc_streamer(
+            key="student-webcam",
+            mode=WebRtcMode.SENDONLY,
+            media_stream_constraints={"video": True, "audio": False},
+            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+        )
+        
+        # --- BẢO MẬT NÂNG CAO: CÒI CẢNH SÁT + ĐẢO ĐỀ + CHỐNG RỜI TAB ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
-            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO - GIÁM SÁT CAMERA AI & ĐẢO ĐỀ</h4>
+            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO - GIÁM SÁT & ĐẢO ĐỀ</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Camera đang hoạt động. Cấm quay mặt đi chỗ khác, dùng điện thoại hoặc rời tab. Vi phạm sẽ hú còi cảnh sát và KHÓA BÀI NGAY!
+                Hệ thống đang giám sát. Cấm rời tab hoặc chia đôi màn hình. Vi phạm sẽ hú còi cảnh sát và KHÓA BÀI NGAY!
             </p>
         </div>
-        
-        <div id="camera-container" style="margin-bottom: 15px; text-align: center; background: #000; padding: 10px; border-radius: 8px; width: 220px; display: inline-block;">
-            <video id="webcam" autoplay playsinline width="200" height="150" style="border-radius: 6px; transform: scaleX(-1);"></video>
-            <p style="color: #4caf50; font-size: 12px; margin: 5px 0 0 0;">🟢 Camera AI Đang Giám Sát</p>
-        </div>
-
         <script>
         function forceFullscreen() {
             let elem = window.parent.document.documentElement;
@@ -354,18 +358,6 @@ if user["role"] == "Học sinh":
         let isLocked = false;
         let isSubmitting = false;
 
-        // Kích hoạt camera
-        navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-            .then(function(stream) {
-                let videoElement = window.parent.document.getElementById('webcam');
-                if (videoElement) {
-                    videoElement.srcObject = stream;
-                }
-            })
-            .catch(function(err) {
-                console.log("Lỗi camera: ", err);
-            });
-
         window.parent.document.addEventListener("click", function(e) {
             let target = e.target.closest("button");
             if (target && (target.innerText.includes("Nộp Bài") || target.innerText.includes("🚀"))) {
@@ -373,6 +365,7 @@ if user["role"] == "Học sinh":
             }
         });
 
+        // Hàm phát còi hú cảnh sát (Police Siren Effect)
         function playPoliceSiren() {
             try {
                 let ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -417,7 +410,7 @@ if user["role"] == "Học sinh":
             overlay.style.justifyContent = 'center';
             overlay.style.alignItems = 'center';
             overlay.style.fontFamily = 'sans-serif';
-            overlay.innerHTML = '<h1 style="font-size: 2.5rem; margin-bottom: 20px; text-align: center;">🚨 PHÁT HIỆN GIAN LẬN: ' + reason + '</h1><p style="font-size: 1.3rem; text-align: center; padding: 0 20px;">Hệ thống camera AI đã khóa bài thi và báo cáo về cho giáo viên.</p>';
+            overlay.innerHTML = '<h1 style="font-size: 2.5rem; margin-bottom: 20px; text-align: center;">🚨 PHÁT HIỆN GIAN LẬN: ' + reason + '</h1><p style="font-size: 1.3rem; text-align: center; padding: 0 20px;">Hệ thống đã khóa bài thi và báo cáo về cho giáo viên.</p>';
             window.parent.document.body.appendChild(overlay);
 
             setTimeout(function() {
@@ -451,8 +444,7 @@ if user["role"] == "Học sinh":
         });
         </script>
         """
-        # Cấp quyền camera và microphone cho iframe component
-        components.html(security_script, height=300, allow="camera; microphone")
+        components.html(security_script, height=120)
         
         st.subheader(f"📖 Đề thi: {exam_title} (Thời gian: {exam_duration} phút - Đã đảo thứ tự câu hỏi)")
         
@@ -720,7 +712,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
             st.info("Chưa có lớp học nào.")
 
     with t_tab4:
-        st.subheader("🚨 Thống Kê Học Sinh Vi Phạm Quy Chế (Camera & Tab)")
+        st.subheader("🚨 Thống Kê Học Sinh Vi Phạm Quy Chế")
         cursor.execute("""
             SELECT id, exam_code, student_name, stt, class_name, status, submitted_at 
             FROM submissions WHERE violations > 0 OR status LIKE '%vi phạm%' OR status LIKE '%khóa%'
@@ -730,7 +722,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
         if violations_db:
             df_violations = pd.DataFrame(violations_db, columns=["ID", "Mã đề", "Họ tên", "STT", "Lớp", "Trạng thái vi phạm", "Thời gian ghi nhận"])
             st.dataframe(df_violations, use_container_width=True)
-            st.warning("⚠️ Những học sinh có tên trong danh sách trên đã vi phạm quy chế (quay mặt đi chỗ khác, dùng điện thoại hoặc rời tab) trong lúc làm bài!")
+            st.warning("⚠️ Những học sinh có tên trong danh sách trên đã vi phạm quy chế (rời tab, chuyển màn hình) trong lúc làm bài!")
         else:
             st.success("🎉 Tuyệt vời! Chưa có học sinh nào vi phạm quy chế trong đợt kiểm tra này.")
 
