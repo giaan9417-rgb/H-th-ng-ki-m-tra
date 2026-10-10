@@ -27,9 +27,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- KHỞI TẠO DATABASE SQLITE (DÙNG v15 ĐỂ ĐỒ bộ DỮ LIỆU) ---
+# --- KHỞI TẠO DATABASE SQLITE (DÙNG v16 ĐỂ LÀM SẠCH DỮ LIỆU) ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v15.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v16.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
@@ -132,25 +132,24 @@ def parse_docx_to_questions(docx_file):
         questions.append(current_q)
     return questions
 
-# --- XỬ LÝ KHI HỌC SINH VI PHẠM (GHI NHẬN VÀO DB ĐỂ BÁO GIÁO VIÊN) ---
+# --- XỬ LÝ KHI HỌC SINH VI PHẠM ---
 if st.query_params.get("violated") == "true":
     if "user" in st.session_state and st.session_state.user and st.session_state.user["role"] == "Học sinh":
         u = st.session_state.user
         e_code = st.session_state.get("active_exam", "UNKNOWN")
-        # Kiểm tra xem đã ghi nhận vi phạm cho lần thi này chưa để tránh ghi đúp
         cursor.execute("""
             INSERT INTO submissions (exam_code, student_email, student_name, stt, class_name, score, violations, status, submitted_at, details)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             e_code, u["email"], u["name"], u["stt"], u["class_name"],
-            0.0, 1, "⚠️ Vi phạm (Camera AI / Rời tab)", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            json.dumps([{"error": "Học sinh vi phạm quy chế: Rời tab hoặc sử dụng thiết bị khác trong khung hình"}], ensure_ascii=False)
+            0.0, 1, "⚠️ Vi phạm (Camera che đen / Rời tab)", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            json.dumps([{"error": "Học sinh vi phạm quy chế: Che camera, tắt camera hoặc rời khỏi tab thi"}], ensure_ascii=False)
         ))
         conn.commit()
         for key in ["active_exam", "active_exam_title", "active_exam_duration", "active_exam_questions"]:
             if key in st.session_state:
                 del st.session_state[key]
-    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Hành vi rời tab hoặc sử dụng thiết bị ngoài đã được hệ thống ghi nhận tính 1 lượt thi. Bài làm đã bị khóa và báo cáo về cho giáo viên.")
+    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Hành vi che camera hoặc rời tab đã được ghi nhận tính 1 lượt thi. Bài làm đã bị khóa và báo cáo về cho giáo viên.")
     if st.button("Quay lại màn hình chính"):
         st.query_params.clear()
         st.rerun()
@@ -166,7 +165,7 @@ if st.session_state.user is None:
     st.markdown("""
     <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 30px; border-radius: 12px; color: white; text-align: center; margin-bottom: 25px;">
         <h1 style="color: white; margin-bottom: 10px;">🎓 HỆ THỐNG KIỂM TRA TRỰC TUYẾN THÔNG MINH</h1>
-        <p style="font-size: 16px; opacity: 0.9;">Bảo mật tuyệt đối - Nhận diện thiết bị qua Camera AI - Đảo đề tự động</p>
+        <p style="font-size: 16px; opacity: 0.9;">Bảo mật tuyệt đối - Phát hiện che camera AI - Đảo đề tự động</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -305,15 +304,14 @@ if user["role"] == "Học sinh":
         st.error("❌ Bạn đã hết số lần làm bài cho phép đối với đề thi này!")
         st.stop()
         
-    # --- YÊU CẦU BẮT BUỘC BẬT CAMERA TRƯỚC KHI VÀO THI ---
+    # --- KIỂM TRA CAMERA TRƯỚC KHI VÀO THI ---
     st.markdown("---")
-    st.subheader("📷 Kiểm Tra Camera Bắt Buộc Trước Khi Thi")
-    st.markdown("Vui lòng cho phép trình duyệt truy cập Camera để hệ thống xác thực khuôn mặt và nhận diện thiết bị trước khi bắt đầu.")
+    st.subheader("📷 Xác Thực Camera Trước Khi Thi")
     
     cam_check_html = """
-    <div style="text-align: center; background: #111; padding: 15px; border-radius: 10px; width: 260px; margin: auto;">
-        <video id="preview-cam" autoplay playsinline width="240" height="180" style="border-radius: 8px; transform: scaleX(-1);"></video>
-        <p id="cam-status" style="color: #ff9800; font-size: 13px; margin-top: 8px;">⏳ Đang kết nối camera...</p>
+    <div style="text-align: center; background: #111; padding: 12px; border-radius: 10px; width: 240px; margin: auto;">
+        <video id="preview-cam" autoplay playsinline muted width="220" height="160" style="border-radius: 8px; transform: scaleX(-1); background: #222;"></video>
+        <p id="cam-status" style="color: #ff9800; font-size: 12px; margin-top: 6px;">⏳ Đang bật camera...</p>
     </div>
     <script>
     navigator.mediaDevices.getUserMedia({ video: true, audio: false })
@@ -321,28 +319,27 @@ if user["role"] == "Học sinh":
             let v = window.parent.document.getElementById('preview-cam');
             if (v) {
                 v.srcObject = stream;
-                window.parent.document.getElementById('cam-status').innerText = "🟢 Camera đã sẵn sàng!";
+                window.parent.document.getElementById('cam-status').innerText = "🟢 Camera sẵn sàng!";
                 window.parent.document.getElementById('cam-status').style.color = "#4caf50";
             }
         })
         .catch(function(err) {
             let s = window.parent.document.getElementById('cam-status');
             if(s) {
-                s.innerText = "❌ Chưa bật Camera hoặc bị chặn quyền!";
+                s.innerText = "❌ Chưa cho phép Camera!";
                 s.style.color = "#f44336";
             }
         });
     </script>
     """
-    components.html(cam_check_html, height=230)
+    components.html(cam_check_html, height=210)
     
-    # Nút bắt đầu (chỉ cho phép khi học sinh đã bật camera)
     if st.button("🚀 Bắt Đầu Làm Bài Ngay (Đã bật Đảo Đề & Camera AI)"):
         cursor.execute("SELECT questions FROM exams WHERE exam_code = ?", (exam_code_input,))
         q_row = cursor.fetchone()
         if q_row:
             raw_questions = json.loads(q_row[0])
-            # --- HOÁN VỊ / ĐẢO ĐỀ TỰ ĐỘNG RIÊNG CHO TỪNG HỌC SINH ---
+            # --- ĐẢO ĐỀ TỰ ĐỘNG CHO TỪNG HỌC SINH ---
             seed_value = user["email"] + exam_code_input + str(attempts_made)
             rng = random.Random(seed_value)
             rng.shuffle(raw_questions)
@@ -360,22 +357,19 @@ if user["role"] == "Học sinh":
         exam_duration = st.session_state.active_exam_duration
         questions = st.session_state.active_exam_questions
         
-        # --- BẢO MẬT NÂNG CAO: CAMERA AI QUÉT ĐIỆN THOẠI + CÒI CẢNH SÁT + CHỐNG RỜI TAB ---
+        # --- BẢO MẬT NÂNG CAO: CAMERA TRỰC TIẾP + PHÁT HIỆN CHE ĐEN + CHỐNG RỜI TAB + KHÔNG LỖI NỘP BÀI ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
-            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO - GIÁM SÁT CAMERA AI & THIẾT BỊ KHÁC</h4>
+            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO - GIÁM SÁT CAMERA AI & CHỐNG CHE MẮT</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Camera AI đang quét chống gian lận. Cấm dùng điện thoại, thiết bị khác hoặc rời tab. Vi phạm sẽ hú còi cảnh sát và KHÓA BÀI TÍNH LƯỢT!
+                Camera đang bật. Cấm che camera, tắt camera hoặc rời tab. Vi phạm sẽ hú còi cảnh sát và KHÓA BÀI TÍNH 1 LƯỢT!
             </p>
         </div>
         
-        <div style="text-align: center; background: #000; padding: 8px; border-radius: 8px; width: 200px; margin-bottom: 15px;">
-            <video id="live-cam" autoplay playsinline width="180" height="130" style="border-radius: 6px; transform: scaleX(-1);"></video>
-            <p style="color: #4caf50; font-size: 11px; margin: 3px 0 0 0;">🟢 Đang giám sát AI</p>
+        <div style="text-align: center; background: #000; padding: 6px; border-radius: 8px; width: 180px; margin-bottom: 15px;">
+            <video id="live-cam" autoplay playsinline muted width="160" height="120" style="border-radius: 6px; transform: scaleX(-1); background: #222;"></video>
+            <p style="color: #4caf50; font-size: 11px; margin: 3px 0 0 0;">🟢 Camera Đang Chạy</p>
         </div>
-
-        <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-        <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
 
         <script>
         function forceFullscreen() {
@@ -389,10 +383,8 @@ if user["role"] == "Học sinh":
 
         let isLocked = false;
         let isSubmitting = false;
-        let cocoModel = null;
-        let modelReady = false;
 
-        // Khởi động Camera trong phòng thi
+        // Kích hoạt camera trong phòng thi
         navigator.mediaDevices.getUserMedia({ video: true, audio: false })
             .then(function(stream) {
                 let v = window.parent.document.getElementById('live-cam');
@@ -400,37 +392,55 @@ if user["role"] == "Học sinh":
             })
             .catch(function(err) { console.log("Lỗi camera: ", err); });
 
-        // Tải mô hình AI COCO-SSD để nhận diện điện thoại / thiết bị khác
-        cocoSsd.load().then(function(loadedModel) {
-            cocoModel = loadedModel;
-            modelReady = true;
-            detectPhoneLoop();
-        });
+        // Vô hiệu hóa bảo vệ khi học sinh bấm nộp bài
+        window.parent.document.addEventListener("click", function(e) {
+            let target = e.target.closest("button");
+            if (target) {
+                let text = target.innerText || target.textContent;
+                if (text.includes("Nộp") || text.includes("🚀")) {
+                    isSubmitting = true;
+                }
+            }
+        }, true);
 
-        async function detectPhoneLoop() {
-            if (!modelReady || isLocked || isSubmitting) return;
-            let videoElement = window.parent.document.getElementById('live-cam');
-            if (videoElement && videoElement.readyState === 4) {
+        window.parent.document.addEventListener("submit", function(e) {
+            isSubmitting = true;
+        }, true);
+
+        // --- THUẬT TOÁN QUÉT CAMERA BỊ CHE ĐEN / TẮT ---
+        let canvas = document.createElement('canvas');
+        canvas.width = 100;
+        canvas.height = 75;
+        let ctx = canvas.getContext('2d');
+        let darkCheckCount = 0;
+
+        function checkCameraBlocked() {
+            if (isLocked || isSubmitting) return;
+            let video = window.parent.document.getElementById('live-cam');
+            if (video && video.readyState === 4) {
                 try {
-                    let predictions = await cocoModel.detect(videoElement);
-                    for (let p of predictions) {
-                        // Nếu phát hiện điện thoại (cell phone) với độ chính xác cao
-                        if (p.class === 'cell phone' && p.score > 0.55) {
-                            triggerLockdown("PHÁT HIỆN SỬ DỤNG ĐIỆN THOẠI / THIẾT BỊ KHÁC");
-                            return;
+                    ctx.drawImage(video, 0, 0, 100, 75);
+                    let imgData = ctx.getImageData(0, 0, 100, 75);
+                    let data = imgData.data;
+                    let colorSum = 0;
+                    for (let i = 0; i < data.length; i += 16) {
+                        colorSum += (data[i] + data[i+1] + data[i+2]) / 3;
+                    }
+                    let avgBrightness = colorSum / (data.length / 16);
+                    
+                    // Nếu độ sáng quá thấp (camera bị che đen hoàn toàn hoặc dán băng dính)
+                    if (avgBrightness < 8) {
+                        darkCheckCount++;
+                        if (darkCheckCount >= 3) { // Duy trì đen liên tục 3 giây
+                            triggerLockdown("CAMERA BỊ CHE ĐEN HOẶC TẮT");
                         }
+                    } else {
+                        darkCheckCount = 0;
                     }
                 } catch(e) {}
             }
-            setTimeout(detectPhoneLoop, 1500); // Quét mỗi 1.5 giây
         }
-
-        window.parent.document.addEventListener("click", function(e) {
-            let target = e.target.closest("button");
-            if (target && (target.innerText.includes("Nộp Bài") || target.innerText.includes("🚀"))) {
-                isSubmitting = true;
-            }
-        });
+        setInterval(checkCameraBlocked, 1000);
 
         // Hàm phát còi hú cảnh sát
         function playPoliceSiren() {
@@ -511,7 +521,7 @@ if user["role"] == "Học sinh":
         });
         </script>
         """
-        components.html(security_script, height=220)
+        components.html(security_script, height=180)
         
         st.subheader(f"📖 Đề thi: {exam_title} (Thời gian: {exam_duration} phút - Đã đảo thứ tự câu hỏi)")
         
@@ -789,7 +799,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
         if violations_db:
             df_violations = pd.DataFrame(violations_db, columns=["ID", "Mã đề", "Họ tên", "STT", "Lớp", "Trạng thái vi phạm", "Thời gian ghi nhận"])
             st.dataframe(df_violations, use_container_width=True)
-            st.warning("⚠️ Danh sách các học sinh đã vi phạm quy chế (sử dụng điện thoại / rời tab / chuyển màn hình) trong đợt kiểm tra!")
+            st.warning("⚠️ Danh sách các học sinh đã vi phạm quy chế (che camera, tắt camera hoặc rời tab) trong quá trình kiểm tra!")
         else:
             st.success("🎉 Tuyệt vời! Chưa có học sinh nào vi phạm quy chế trong đợt kiểm tra này.")
 
