@@ -16,7 +16,7 @@ st.set_page_config(
 
 # --- KHỞI TẠO DATABASE SQLITE (TÍCH HỢP WAL MODE CHO 35+ HỌC SINH ĐỒNG THỜI) ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v7.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v8.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
@@ -121,7 +121,7 @@ def parse_docx_to_questions(docx_file):
         questions.append(current_q)
     return questions
 
-# --- KIỂM TRA TÍN HIỆU VI PHẠM TỪ HỌC SINH ---
+# --- XỬ LÝ KHI HỌC SINH VI PHẠM (RỜI TAB / CHIA ĐÔI MÀN HÌNH / AI) ---
 if st.query_params.get("violated") == "true":
     if "user" in st.session_state and st.session_state.user and st.session_state.user["role"] == "Học sinh":
         u = st.session_state.user
@@ -131,14 +131,14 @@ if st.query_params.get("violated") == "true":
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             e_code, u["email"], u["name"], u["student_id"], u["stt"], u["class_name"],
-            0.0, 1, "⚠️ Vi phạm (Rời màn hình/AI)", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            json.dumps([{"error": "Học sinh rời khỏi tab hoặc mở trợ lý AI trong lúc thi"}], ensure_ascii=False)
+            0.0, 1, "⚠️ Vi phạm (Rời tab/Chia đôi màn hình/AI)", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            json.dumps([{"error": "Học sinh rời khỏi tab, chia đôi màn hình hoặc mở cửa sổ nổi AI"}], ensure_ascii=False)
         ))
         conn.commit()
         for key in ["active_exam", "active_exam_title", "active_exam_duration", "active_exam_questions"]:
             if key in st.session_state:
                 del st.session_state[key]
-    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Bài làm đã bị khóa và báo cáo về cho giáo viên.")
+    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Hành vi rời tab, chia đôi màn hình hoặc mở cửa sổ nổi AI đã bị ghi nhận. Bài làm đã bị khóa và báo cáo về cho giáo viên.")
     if st.button("Quay lại màn hình chính"):
         st.query_params.clear()
         st.rerun()
@@ -154,7 +154,7 @@ if st.session_state.user is None:
     st.markdown("""
     <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 30px; border-radius: 12px; color: white; text-align: center; margin-bottom: 25px;">
         <h1 style="color: white; margin-bottom: 10px;">🎓 HỆ THỐNG KIỂM TRA TRỰC TUYẾN THÔNG MINH</h1>
-        <p style="font-size: 16px; opacity: 0.9;">Bảo mật cao - Chống gian lận - Quét đề tự động</p>
+        <p style="font-size: 16px; opacity: 0.9;">Bảo mật tuyệt đối - Chống gian lận đa nhiệm & AI - Quét đề tự động</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -314,11 +314,12 @@ if user["role"] == "Học sinh":
         exam_duration = st.session_state.active_exam_duration
         questions = st.session_state.active_exam_questions
         
+        # --- BẢO MẬT NÂNG CAO: CHỐNG CHIA ĐÔI MÀN HÌNH, TRỢ LÝ AI NỔI (GEMINI) & RỜI TAB ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
-            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO</h4>
+            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO - CHỐNG ĐA NHIỆM & AI</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Hệ thống chạy <b>Toàn màn hình</b>. Mọi hành vi rời màn hình hoặc bật trợ lý AI sẽ làm bài thi bị KHÓA NGAY!
+                Bắt buộc Toàn màn hình. Cấm chia đôi màn hình, mở cửa sổ nổi AI (Gemini) hoặc rời tab. Vi phạm sẽ KHÓA BÀI NGAY!
             </p>
         </div>
         <script>
@@ -332,6 +333,8 @@ if user["role"] == "Học sinh":
         document.addEventListener("click", forceFullscreen);
 
         let isLocked = false;
+
+        // 1. Phát hiện mất tiêu điểm (blur) hoặc chuyển tab (visibilitychange)
         window.addEventListener("blur", function() {
             if (!isLocked) {
                 isLocked = true;
@@ -347,9 +350,26 @@ if user["role"] == "Học sinh":
                 window.parent.location.href = currentUrl + "?violated=true";
             }
         });
+
+        // 2. Phát hiện thay đổi kích thước khung hình đột ngột (hành vi chia đôi màn hình / mở app nổi AI)
+        let initialWidth = window.innerWidth;
+        window.addEventListener("resize", function() {
+            if (Math.abs(window.innerWidth - initialWidth) > 180 && !isLocked) {
+                isLocked = true;
+                let currentUrl = window.parent.location.href.split('?')[0];
+                window.parent.location.href = currentUrl + "?violated=true";
+            }
+        });
+
+        document.addEventListener("contextmenu", e => e.preventDefault());
+        document.addEventListener("keydown", function(e) {
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+            }
+        });
         </script>
         """
-        components.html(security_script, height=120)
+        components.html(security_script, height=130)
         
         st.subheader(f"📖 Đề thi: {exam_title} (Thời gian: {exam_duration} phút)")
         
@@ -628,7 +648,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
         if violations_db:
             df_violations = pd.DataFrame(violations_db, columns=["ID", "Mã đề", "Họ tên", "MSSV", "STT", "Lớp", "Trạng thái vi phạm", "Thời gian ghi nhận"])
             st.dataframe(df_violations, use_container_width=True)
-            st.warning("⚠️ Những học sinh có tên trong danh sách trên đã thực hiện hành vi rời khỏi tab, thu nhỏ màn hình hoặc bật ứng dụng trợ lý AI trong lúc làm bài!")
+            st.warning("⚠️ Những học sinh có tên trong danh sách trên đã thực hiện hành vi rời khỏi tab, chia đôi màn hình hoặc bật cửa sổ nổi trợ lý AI trong lúc làm bài!")
         else:
             st.success("🎉 Tuyệt vời! Chưa có học sinh nào vi phạm quy chế trong đợt kiểm tra này.")
 
