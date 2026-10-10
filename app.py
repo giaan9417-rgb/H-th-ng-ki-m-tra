@@ -16,7 +16,7 @@ st.set_page_config(
 
 # --- KHỞI TẠO DATABASE SQLITE ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v4.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v5.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -78,7 +78,7 @@ def init_db():
 conn = init_db()
 cursor = conn.cursor()
 
-# --- HÀM PHÂN TÍCH FILE WORD (.DOCX) DỰA TRÊN ĐỊNH DẠNG GẠCH CHÂN ---
+# --- HÀM PHÂN TÍCH & TỰ ĐỘNG QUÉT, PHÂN LOẠI CÂU HỎI TỪ FILE WORD ---
 def parse_docx_to_questions(docx_file):
     doc = Document(docx_file)
     questions = []
@@ -100,7 +100,7 @@ def parse_docx_to_questions(docx_file):
                 "options": [],
                 "statements": [],
                 "answer": "",
-                "points": 1.0 # Mặc định mỗi câu 1 điểm
+                "points": 1.0
             }
         elif current_q is not None:
             if (len(text) > 1 and text[0].upper() in ['A', 'B', 'C', 'D'] and text[1] in ['.', ')', ' ']):
@@ -119,7 +119,7 @@ def parse_docx_to_questions(docx_file):
         questions.append(current_q)
     return questions
 
-# --- HỆ THỐNG XÁC THỰC & ĐĂNG NHẬP ---
+# --- XÁC THỰC & ĐĂNG NHẬP ---
 st.sidebar.title("🔐 Đăng Nhập Hệ Thống")
 
 if "user" not in st.session_state:
@@ -274,16 +274,15 @@ if user["role"] == "Học sinh":
         q_row = cursor.fetchone()
         questions = json.loads(q_row[0])
         
-        # --- JAVASCRIPT: TỰ ĐỘNG BẬT TOÀN MÀN HÌNH & KHÓA BÀI KHI THOÁT TAB ---
+        # --- JAVASCRIPT: BẬT TOÀN MÀN HÌNH, CHẶN CHIA ĐÔI MÀN HÌNH / GEMINI & KHÓA BÀI KHI THOÁT ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
-            <h4 style="margin: 0; color: #b71c1c;">🚨 CHẾ ĐỘ GIÁM SÁT NGHIÊM NGẶT ĐANG BẬT</h4>
+            <h4 style="margin: 0; color: #b71c1c;">🚨 CHẾ ĐỘ GIÁM SÁT AN NINH TUYỆT ĐỐI</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Hệ thống đang chạy ở chế độ <b>Toàn màn hình</b>. Nếu bạn chuyển tab hoặc thoát khỏi màn hình thi, bài làm sẽ bị <b>KHÓA NGAY LẬP TỨC</b> và báo cáo về giáo viên!
+                Hệ thống bắt buộc chạy <b>Toàn màn hình</b> và chặn mọi hành vi chia đôi màn hình, mở ứng dụng nổi (Gemini/AI). Nếu vi phạm, bài làm sẽ bị <b>KHÓA NGAY LẬP TỨC</b>!
             </p>
         </div>
         <script>
-        // Tự động bật toàn màn hình ngay khi tải trang
         function forceFullscreen() {
             let elem = window.parent.document.documentElement;
             if (elem.requestFullscreen) {
@@ -293,14 +292,22 @@ if user["role"] == "Học sinh":
         window.onload = forceFullscreen;
         document.addEventListener("click", forceFullscreen);
 
-        // Phát hiện rời khỏi màn hình/tab -> Khóa bài ngay
+        // Phát hiện rời tab hoặc mất focus
         let isLocked = false;
         document.addEventListener("visibilitychange", function() {
             if (document.hidden && !isLocked) {
                 isLocked = true;
-                alert("🚨 PHÁT HIỆN THOÁT KHỎI BÀI THI! Bài làm của bạn đã bị khóa và gửi báo cáo vi phạm về cho giáo viên.");
-                window.parent.postMessage({type: 'lock_exam'}, '*');
-                // Tự động reload hoặc chuyển trang khóa
+                alert("🚨 PHÁT HIỆN RỜI KHỎI BÀI THI! Bài làm đã bị khóa và báo cáo về giáo viên.");
+                window.location.reload();
+            }
+        });
+
+        // Phát hiện hành vi chia đôi màn hình / đổi kích thước cửa sổ đáng ngờ (chống dùng app nổi AI)
+        let initialWidth = window.innerWidth;
+        window.addEventListener("resize", function() {
+            if (Math.abs(window.innerWidth - initialWidth) > 150 && !isLocked) {
+                isLocked = true;
+                alert("🚨 PHÁT HIỆN THAY ĐỔI GIAO DIỆN / CHIA ĐÔI MÀN HÌNH! Bài thi bị khóa.");
                 window.location.reload();
             }
         });
@@ -368,8 +375,6 @@ if user["role"] == "Học sinh":
                             "correct": correct_choice,
                             "is_correct": is_stmt_correct
                         })
-                    # Biểu điểm Đúng/Sai chuẩn nhân với hệ số điểm câu:
-                    # 1 ý = 0.1 | 2 ý = 0.25 | 3 ý = 0.5 | 4 ý = 1.0
                     fraction_mapping = {0: 0.0, 1: 0.1, 2: 0.25, 3: 0.5, 4: 1.0}
                     q_score = fraction_mapping.get(correct_count, 0.0) * q_pts
                     total_score += q_score
@@ -414,16 +419,27 @@ if user["role"] == "Học sinh":
             ))
             conn.commit()
             
-            # Kiểm tra xem giáo viên có cho phép hiện điểm không
             cursor.execute("SELECT show_score FROM exams WHERE exam_code = ?", (exam_code_input,))
             show_score_setting = cursor.fetchone()[0]
             
             del st.session_state.active_exam
+            
+            # --- JAVASCRIPT THOÁT TOÀN MÀN HÌNH SAU KHI NỘP BÀI ---
+            exit_fullscreen_script = """
+            <script>
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(err => { console.log(err); });
+            }
+            </script>
+            """
+            components.html(exit_fullscreen_script, height=0)
+            
             if show_score_setting == 1:
                 st.success(f"🎉 Nộp bài thành công! Tổng điểm của bạn: **{total_score:.2f} điểm**")
             else:
                 st.success("🎉 Nộp bài thành công! Bài làm của bạn đã được ghi nhận vào hệ thống.")
             st.balloons()
+            st.rerun()
 
 # ==========================================
 # GIAO DIỆN GIÁO VIÊN / QUẢN TRỊ
@@ -440,7 +456,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
     
     with t_tab1:
         st.subheader("1. Hướng Dẫn & Mẫu Đề Thi File Word (.docx)")
-        with st.expander("📌 Xem cấu trúc mẫu file Word chuẩn để tải lên"):
+        with st.expander("📌 Xem cấu trúc mẫu file Word chuẩn để quét tự động"):
             st.markdown("""
             **- Dạng Trắc nghiệm nhiều lựa chọn:**
             > Câu 1: Nội dung câu hỏi...
@@ -458,7 +474,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
             """)
             
         st.markdown("---")
-        st.subheader("2. Tải Lên Đề Thi Mới")
+        st.subheader("2. Tải Lên & Tự Động Quét Đề Thi")
         cursor.execute("SELECT class_name FROM classes")
         cls_list = [c[0] for c in cursor.fetchall()]
         cls_choices = ["Tất cả"] + cls_list
@@ -477,13 +493,17 @@ elif user["role"] == "Giáo viên / Quản trị viên":
             
         up_file = st.file_uploader("Chọn file Word đề thi (.docx):", type=["docx"])
         
-        if up_file and st.button("Lưu Đề Thi Vào Kho"):
+        if up_file and st.button("Quét và Lưu Đề Thi"):
             try:
                 parsed_q = parse_docx_to_questions(up_file)
                 if not parsed_q:
                     st.error("⚠️ Không đọc được câu hỏi từ file Word.")
                 else:
-                    # Gán điểm số cho từng câu theo lựa chọn của giáo viên
+                    mcq_count = sum(1 for q in parsed_q if q.get("type") == "mcq")
+                    tf_count = sum(1 for q in parsed_q if q.get("type") == "true_false")
+                    
+                    st.success(f"🔍 Hệ thống đã quét tự động thành công: **{len(parsed_q)} câu** tổng cộng (Trắc nghiệm: {mcq_count}, Đúng/Sai: {tf_count}).")
+                    
                     for q in parsed_q:
                         q["points"] = default_q_pts
                         
@@ -497,7 +517,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     ))
                     conn.commit()
-                    st.success(f"✅ Đã thêm đề thi `{up_code}` vào kho đề thành công!")
+                    st.info(f"✅ Đã lưu đề thi `{up_code}` vào kho đề thành công!")
             except Exception as e:
                 st.error(f"Lỗi xử lý file: {e}")
                 
