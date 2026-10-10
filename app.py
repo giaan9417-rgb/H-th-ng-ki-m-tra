@@ -6,60 +6,13 @@ from datetime import datetime
 import streamlit.components.v1 as components
 from docx import Document
 
-# --- CẤU HÌNH TRANG & CSS TỰ CHỌN ---
+# --- CẤU HÌNH TRANG ---
 st.set_page_config(
-    page_title="Hệ Thống Khảo Sát & Kiểm Tra Trực Tuyến",
-    page_icon="🎓",
+    page_title="Hệ Thống Kiểm Tra Trực Tuyến & Chống Gian Lận",
+    page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Custom CSS cho giao diện chuyên nghiệp & chống quét Gemini
-st.markdown("""
-<style>
-    /* CSS Chống bôi đen & quét chữ của trợ lý AI / Gemini */
-    body, div, p, span, h1, h2, h3, label {
-        -webkit-user-select: none !important;
-        -moz-user-select: none !important;
-        -ms-user-select: none !important;
-        user-select: none !important;
-    }
-    
-    /* Style Header & Landing Page */
-    .hero-header {
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-        padding: 30px;
-        border-radius: 12px;
-        color: white;
-        text-align: center;
-        margin-bottom: 25px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-    .hero-header h1 {
-        color: #ffffff !important;
-        font-weight: 700;
-        margin-bottom: 10px;
-    }
-    .hero-header p {
-        font-size: 16px;
-        opacity: 0.9;
-    }
-    
-    .feature-card {
-        background: #ffffff;
-        border-radius: 10px;
-        padding: 20px;
-        border: 1px solid #e0e0e0;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        text-align: center;
-        margin-bottom: 15px;
-    }
-    .feature-card h4 {
-        color: #1e3c72;
-        margin-top: 10px;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 # --- KHỞI TẠO DATABASE SQLITE ---
 def init_db():
@@ -125,7 +78,7 @@ def init_db():
 conn = init_db()
 cursor = conn.cursor()
 
-# --- HÀM PHÂN TÍCH WORD ---
+# --- HÀM PHÂN TÍCH WORD (PHÂN BIỆT CHỮ HOA A,B,C,D VÀ CHỮ THƯỜNG a,b,c,d) ---
 def parse_docx_to_questions(docx_file):
     doc = Document(docx_file)
     questions = []
@@ -150,11 +103,13 @@ def parse_docx_to_questions(docx_file):
                 "points": 1.0
             }
         elif current_q is not None:
-            if (len(text) > 1 and text[0].upper() in ['A', 'B', 'C', 'D'] and text[1] in ['.', ')', ' ']):
+            # Trắc nghiệm dùng chữ HOA: A, B, C, D
+            if (len(text) > 1 and text[0] in ['A', 'B', 'C', 'D'] and text[1] in ['.', ')', ' ']):
                 current_q["options"].append(text)
                 if is_underlined:
-                    current_q["answer"] = text[0].upper()
-            elif (len(text) > 1 and text[0].lower() in ['a', 'b', 'c', 'd'] and text[1] in ['.', ')', ' ']):
+                    current_q["answer"] = text[0]
+            # Đúng/Sai dùng chữ thường: a, b, c, d
+            elif (len(text) > 1 and text[0] in ['a', 'b', 'c', 'd'] and text[1] in ['.', ')', ' ']):
                 current_q["type"] = "true_false"
                 ans_val = "Đúng" if is_underlined else "Sai"
                 current_q["statements"].append({"text": text, "answer": ans_val})
@@ -173,41 +128,15 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 if st.session_state.user is None:
-    # --- LANDING PAGE CHUYÊN NGHIỆP LÚC MỚI VÀO ---
     st.markdown("""
-    <div class="hero-header">
-        <h1>🎓 HỆ THỐNG KIỂM TRA TRỰC TUYẾN THÔNG MINH</h1>
-        <p>Nền tảng tổ chức thi an toàn, bảo mật cao và minh bạch</p>
+    <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 30px; border-radius: 12px; color: white; text-align: center; margin-bottom: 25px;">
+        <h1 style="color: white; margin-bottom: 10px;">🎓 HỆ THỐNG KIỂM TRA TRỰC TUYẾN THÔNG MINH</h1>
+        <p style="font-size: 16px; opacity: 0.9;">Bảo mật cao - Chống gian lận - Quét đề thông minh</p>
     </div>
     """, unsafe_allow_html=True)
     
-    col_f1, col_f2, col_f3 = st.columns(3)
-    with col_f1:
-        st.markdown("""
-        <div class="feature-card">
-            <h3>🛡️ Chống Gian Lận</h3>
-            <p>Giám sát toàn màn hình, chặn chia sẻ màn hình & trợ lý AI trên thiết bị.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_f2:
-        st.markdown("""
-        <div class="feature-card">
-            <h3>📄 Quét Đề Thông Minh</h3>
-            <p>Hỗ trợ file Word tự động phân loại Trắc nghiệm & Đúng/Sai chuẩn quy chế.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_f3:
-        st.markdown("""
-        <div class="feature-card">
-            <h3>📊 Quản Lý Lớp Học</h3>
-            <p>Xuất file bảng điểm chi tiết theo từng lớp nhanh chóng & chính xác.</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-    st.markdown("---")
-    
     if "register_email" not in st.session_state:
-        st.sidebar.info("💡 Vui lòng nhập Email Google để bắt đầu.")
+        st.sidebar.info("💡 Nhập Email Google của bạn để tiếp tục.")
         login_email = st.sidebar.text_input("Email Google (@gmail.com):")
         
         if st.sidebar.button("Đăng Nhập / Tiếp Tục"):
@@ -354,12 +283,12 @@ if user["role"] == "Học sinh":
         q_row = cursor.fetchone()
         questions = json.loads(q_row[0])
         
-        # --- JAVASCRIPT BẢO MẬT CAO: CHỐNG CHIA SẺ MÀN HÌNH & CHỐNG AI OVERLAY (GEMINI) ---
+        # --- JAVASCRIPT BẢO MẬT DÀNH RIÊNG CHO HỌC SINH LÀM BÀI ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
-            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO ĐANG BẬT</h4>
+            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Hệ thống chặn bôi đen, chặn chia sẻ màn hình / trợ lý AI nổi. Mọi hành vi thoát hoặc đè màn hình sẽ bị KHÓA BÀI!
+                Hệ thống chạy <b>Toàn màn hình</b>. Mọi hành vi rời màn hình hoặc bật trợ lý AI nổi sẽ làm bài thi bị KHÓA NGAY!
             </p>
         </div>
         <script>
@@ -373,12 +302,10 @@ if user["role"] == "Học sinh":
         document.addEventListener("click", forceFullscreen);
 
         let isLocked = false;
-        
-        // 1. Phát hiện mất tiêu điểm (Khi Gemini Overlay kích hoạt tính năng Share Screen/Live)
         window.addEventListener("blur", function() {
             if (!isLocked) {
                 isLocked = true;
-                alert("🚨 HỆ THỐNG PHÁT HIỆN TRỢ LÝ AI HỢP TÁC / RỜI MÀN HÌNH! Bài thi bị khóa ngay lập tức.");
+                alert("🚨 PHÁT HIỆN RỜI MÀN HÌNH HOẶC DÙNG TRỢ LÝ AI! Bài thi bị khóa.");
                 window.location.reload();
             }
         });
@@ -390,17 +317,9 @@ if user["role"] == "Học sinh":
                 window.location.reload();
             }
         });
-
-        // 2. Chặn phím tắt & chuột phải
-        document.addEventListener("contextmenu", e => e.preventDefault());
-        document.addEventListener("keydown", function(e) {
-            if (e.ctrlKey || e.metaKey) {
-                e.preventDefault();
-            }
-        });
         </script>
         """
-        components.html(security_script, height=130)
+        components.html(security_script, height=120)
         
         st.subheader(f"📖 Đề thi: {exam_title} (Thời gian: {exam_duration} phút)")
         
@@ -503,19 +422,19 @@ if user["role"] == "Học sinh":
             
             del st.session_state.active_exam
             
-            # Thoát Fullscreen
+            # Thoát Fullscreen khi nộp bài
             exit_script = "<script>if (document.fullscreenElement) { document.exitFullscreen(); }</script>"
             components.html(exit_script, height=0)
             
             if show_score_setting == 1:
                 st.success(f"🎉 Nộp bài thành công! Điểm của bạn: **{total_score:.2f} điểm**")
             else:
-                st.success("🎉 Nộp bài thành công! Bài làm đã được lưu vào hệ thống.")
+                st.success("🎉 Nộp bài thành công! Bài làm đã được lưu.")
             st.balloons()
             st.rerun()
 
 # ==========================================
-# GIAO DIỆN GIÁO VIÊN / QUẢN TRỊ
+# GIAO DIỆN GIÁO VIÊN / QUẢN TRỊ (KHÔNG BỊ ÉP FULLSCREEN)
 # ==========================================
 elif user["role"] == "Giáo viên / Quản trị viên":
     st.title("⚙️ Cổng Quản Lý Giáo Viên & Kho Đề Thi")
@@ -528,17 +447,17 @@ elif user["role"] == "Giáo viên / Quản trị viên":
     ])
     
     with t_tab1:
-        st.subheader("1. Hướng Dẫn & Mẫu Đề Thi File Word (.docx)")
-        with st.expander("📌 Xem cấu trúc mẫu file Word chuẩn để quét tự động"):
+        st.subheader("1. Hướng Dẫn Định Dạng File Word (.docx)")
+        with st.expander("📌 Xem cấu trúc mẫu file chuẩn để hệ thống quét đúng 100%"):
             st.markdown("""
-            **- Dạng Trắc nghiệm nhiều lựa chọn:**
+            **- Trắc nghiệm nhiều lựa chọn (Sử dụng chữ HOA A, B, C, D):**
             > Câu 1: Nội dung câu hỏi...
             > A. Lựa chọn 1
             > B. Lựa chọn 2 *(Gạch chân đáp án đúng)*
             > C. Lựa chọn 3
             > D. Lựa chọn 4
             
-            **- Dạng Đúng / Sai (Nhiều ý a, b, c, d):**
+            **- Đúng / Sai (Sử dụng chữ thường a, b, c, d):**
             > Câu 2: Nội dung câu hỏi...
             > a) Phát biểu ý a... *(Gạch chân nếu là Đúng)*
             > b) Phát biểu ý b...
@@ -575,7 +494,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
                     mcq_count = sum(1 for q in parsed_q if q.get("type") == "mcq")
                     tf_count = sum(1 for q in parsed_q if q.get("type") == "true_false")
                     
-                    st.success(f"🔍 Đã quét tự động: **{len(parsed_q)} câu** (Trắc nghiệm: {mcq_count}, Đúng/Sai: {tf_count}).")
+                    st.success(f"🔍 Hệ thống đã quét thành công: **{len(parsed_q)} câu** (Trắc nghiệm: {mcq_count}, Đúng/Sai: {tf_count}).")
                     
                     for q in parsed_q:
                         q["points"] = default_q_pts
