@@ -6,17 +6,64 @@ from datetime import datetime
 import streamlit.components.v1 as components
 from docx import Document
 
-# --- CẤU HÌNH TRANG ---
+# --- CẤU HÌNH TRANG & CSS TỰ CHỌN ---
 st.set_page_config(
-    page_title="Hệ Thống Kiểm Tra Trực Tuyến & Chống Gian Lận",
-    page_icon="🛡️",
+    page_title="Hệ Thống Khảo Sát & Kiểm Tra Trực Tuyến",
+    page_icon="🎓",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
+# Custom CSS cho giao diện chuyên nghiệp & chống quét Gemini
+st.markdown("""
+<style>
+    /* CSS Chống bôi đen & quét chữ của trợ lý AI / Gemini */
+    body, div, p, span, h1, h2, h3, label {
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
+        user-select: none !important;
+    }
+    
+    /* Style Header & Landing Page */
+    .hero-header {
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        padding: 30px;
+        border-radius: 12px;
+        color: white;
+        text-align: center;
+        margin-bottom: 25px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    .hero-header h1 {
+        color: #ffffff !important;
+        font-weight: 700;
+        margin-bottom: 10px;
+    }
+    .hero-header p {
+        font-size: 16px;
+        opacity: 0.9;
+    }
+    
+    .feature-card {
+        background: #ffffff;
+        border-radius: 10px;
+        padding: 20px;
+        border: 1px solid #e0e0e0;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        text-align: center;
+        margin-bottom: 15px;
+    }
+    .feature-card h4 {
+        color: #1e3c72;
+        margin-top: 10px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # --- KHỞI TẠO DATABASE SQLITE ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v5.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v6.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -78,7 +125,7 @@ def init_db():
 conn = init_db()
 cursor = conn.cursor()
 
-# --- HÀM PHÂN TÍCH & TỰ ĐỘNG QUÉT, PHÂN LOẠI CÂU HỎI TỪ FILE WORD ---
+# --- HÀM PHÂN TÍCH WORD ---
 def parse_docx_to_questions(docx_file):
     doc = Document(docx_file)
     questions = []
@@ -126,11 +173,44 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 if st.session_state.user is None:
+    # --- LANDING PAGE CHUYÊN NGHIỆP LÚC MỚI VÀO ---
+    st.markdown("""
+    <div class="hero-header">
+        <h1>🎓 HỆ THỐNG KIỂM TRA TRỰC TUYẾN THÔNG MINH</h1>
+        <p>Nền tảng tổ chức thi an toàn, bảo mật cao và minh bạch</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1:
+        st.markdown("""
+        <div class="feature-card">
+            <h3>🛡️ Chống Gian Lận</h3>
+            <p>Giám sát toàn màn hình, chặn chia sẻ màn hình & trợ lý AI trên thiết bị.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_f2:
+        st.markdown("""
+        <div class="feature-card">
+            <h3>📄 Quét Đề Thông Minh</h3>
+            <p>Hỗ trợ file Word tự động phân loại Trắc nghiệm & Đúng/Sai chuẩn quy chế.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_f3:
+        st.markdown("""
+        <div class="feature-card">
+            <h3>📊 Quản Lý Lớp Học</h3>
+            <p>Xuất file bảng điểm chi tiết theo từng lớp nhanh chóng & chính xác.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    st.markdown("---")
+    
     if "register_email" not in st.session_state:
-        st.sidebar.info("💡 Nhập email Google của bạn để tiếp tục.")
+        st.sidebar.info("💡 Vui lòng nhập Email Google để bắt đầu.")
         login_email = st.sidebar.text_input("Email Google (@gmail.com):")
         
-        if st.sidebar.button("Tiếp tục"):
+        if st.sidebar.button("Đăng Nhập / Tiếp Tục"):
             if not login_email or "@" not in login_email:
                 st.sidebar.error("❌ Vui lòng nhập địa chỉ email hợp lệ!")
             else:
@@ -191,7 +271,7 @@ if st.session_state.user is None:
     st.stop()
 else:
     user = st.session_state.user
-    st.sidebar.success(f"👤 Đang đăng nhập:\n**{user['email']}**\nVai trò: **{user['role']}**")
+    st.sidebar.success(f"👤 Tài khoản:\n**{user['email']}**\nVai trò: **{user['role']}**")
     if st.sidebar.button("Đăng xuất"):
         st.session_state.user = None
         if "register_email" in st.session_state:
@@ -202,7 +282,7 @@ else:
 # GIAO DIỆN HỌC SINH
 # ==========================================
 if user["role"] == "Học sinh":
-    st.title("🛡️ Cổng Thi Trực Tuyến - Giám Sát An Ninh Nghiêm Ngặt")
+    st.title("🛡️ Cổng Thi Trực Tuyến - Giám Sát An Ninh")
     
     cursor.execute("SELECT class_name FROM classes")
     all_classes = [c[0] for c in cursor.fetchall()]
@@ -220,7 +300,7 @@ if user["role"] == "Học sinh":
         else:
             s_class = st.text_input("Nhập tên lớp của bạn:", value=user.get("class_name", ""))
             
-        update_profile = st.form_submit_button("💾 Lưu thông tin & Vào phòng thi")
+        update_profile = st.form_submit_button("💾 Lưu thông tin & Tiếp tục")
         
         if update_profile:
             if not s_name or not s_id or not s_stt or not s_class:
@@ -239,7 +319,7 @@ if user["role"] == "Học sinh":
                 st.rerun()
                 
     if not user["name"] or not user["class_name"]:
-        st.info("💡 Vui lòng hoàn tất thông tin cá nhân ở trên để tiếp tục.")
+        st.info("💡 Vui lòng hoàn tất thông tin cá nhân ở trên để xem bài thi.")
         st.stop()
         
     st.markdown("---")
@@ -274,12 +354,12 @@ if user["role"] == "Học sinh":
         q_row = cursor.fetchone()
         questions = json.loads(q_row[0])
         
-        # --- JAVASCRIPT: BẬT TOÀN MÀN HÌNH, CHẶN CHIA ĐÔI MÀN HÌNH / GEMINI & KHÓA BÀI KHI THOÁT ---
+        # --- JAVASCRIPT BẢO MẬT CAO: CHỐNG CHIA SẺ MÀN HÌNH & CHỐNG AI OVERLAY (GEMINI) ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
-            <h4 style="margin: 0; color: #b71c1c;">🚨 CHẾ ĐỘ GIÁM SÁT AN NINH TUYỆT ĐỐI</h4>
+            <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO ĐANG BẬT</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Hệ thống bắt buộc chạy <b>Toàn màn hình</b> và chặn mọi hành vi chia đôi màn hình, mở ứng dụng nổi (Gemini/AI). Nếu vi phạm, bài làm sẽ bị <b>KHÓA NGAY LẬP TỨC</b>!
+                Hệ thống chặn bôi đen, chặn chia sẻ màn hình / trợ lý AI nổi. Mọi hành vi thoát hoặc đè màn hình sẽ bị KHÓA BÀI!
             </p>
         </div>
         <script>
@@ -292,31 +372,30 @@ if user["role"] == "Học sinh":
         window.onload = forceFullscreen;
         document.addEventListener("click", forceFullscreen);
 
-        // Phát hiện rời tab hoặc mất focus
         let isLocked = false;
+        
+        // 1. Phát hiện mất tiêu điểm (Khi Gemini Overlay kích hoạt tính năng Share Screen/Live)
+        window.addEventListener("blur", function() {
+            if (!isLocked) {
+                isLocked = true;
+                alert("🚨 HỆ THỐNG PHÁT HIỆN TRỢ LÝ AI HỢP TÁC / RỜI MÀN HÌNH! Bài thi bị khóa ngay lập tức.");
+                window.location.reload();
+            }
+        });
+
         document.addEventListener("visibilitychange", function() {
             if (document.hidden && !isLocked) {
                 isLocked = true;
-                alert("🚨 PHÁT HIỆN RỜI KHỎI BÀI THI! Bài làm đã bị khóa và báo cáo về giáo viên.");
+                alert("🚨 RỜI KHỎI BÀI THI! Bài thi đã bị khóa.");
                 window.location.reload();
             }
         });
 
-        // Phát hiện hành vi chia đôi màn hình / đổi kích thước cửa sổ đáng ngờ (chống dùng app nổi AI)
-        let initialWidth = window.innerWidth;
-        window.addEventListener("resize", function() {
-            if (Math.abs(window.innerWidth - initialWidth) > 150 && !isLocked) {
-                isLocked = true;
-                alert("🚨 PHÁT HIỆN THAY ĐỔI GIAO DIỆN / CHIA ĐÔI MÀN HÌNH! Bài thi bị khóa.");
-                window.location.reload();
-            }
-        });
-
+        // 2. Chặn phím tắt & chuột phải
         document.addEventListener("contextmenu", e => e.preventDefault());
         document.addEventListener("keydown", function(e) {
-            if (e.ctrlKey && (e.key === 'c' || e.key === 'v' || e.key === 'x' || e.key === 'u' || e.key === 'p')) {
+            if (e.ctrlKey || e.metaKey) {
                 e.preventDefault();
-                alert("⚠️ Phím tắt bị chặn!");
             }
         });
         </script>
@@ -424,20 +503,14 @@ if user["role"] == "Học sinh":
             
             del st.session_state.active_exam
             
-            # --- JAVASCRIPT THOÁT TOÀN MÀN HÌNH SAU KHI NỘP BÀI ---
-            exit_fullscreen_script = """
-            <script>
-            if (document.fullscreenElement) {
-                document.exitFullscreen().catch(err => { console.log(err); });
-            }
-            </script>
-            """
-            components.html(exit_fullscreen_script, height=0)
+            # Thoát Fullscreen
+            exit_script = "<script>if (document.fullscreenElement) { document.exitFullscreen(); }</script>"
+            components.html(exit_script, height=0)
             
             if show_score_setting == 1:
-                st.success(f"🎉 Nộp bài thành công! Tổng điểm của bạn: **{total_score:.2f} điểm**")
+                st.success(f"🎉 Nộp bài thành công! Điểm của bạn: **{total_score:.2f} điểm**")
             else:
-                st.success("🎉 Nộp bài thành công! Bài làm của bạn đã được ghi nhận vào hệ thống.")
+                st.success("🎉 Nộp bài thành công! Bài làm đã được lưu vào hệ thống.")
             st.balloons()
             st.rerun()
 
@@ -467,7 +540,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
             
             **- Dạng Đúng / Sai (Nhiều ý a, b, c, d):**
             > Câu 2: Nội dung câu hỏi...
-            > a) Phát biểu ý a... *(Gạch chân nếu là Đúng, không gạch chân nếu là Sai)*
+            > a) Phát biểu ý a... *(Gạch chân nếu là Đúng)*
             > b) Phát biểu ý b...
             > c) Phát biểu ý c...
             > d) Phát biểu ý d...
@@ -502,7 +575,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
                     mcq_count = sum(1 for q in parsed_q if q.get("type") == "mcq")
                     tf_count = sum(1 for q in parsed_q if q.get("type") == "true_false")
                     
-                    st.success(f"🔍 Hệ thống đã quét tự động thành công: **{len(parsed_q)} câu** tổng cộng (Trắc nghiệm: {mcq_count}, Đúng/Sai: {tf_count}).")
+                    st.success(f"🔍 Đã quét tự động: **{len(parsed_q)} câu** (Trắc nghiệm: {mcq_count}, Đúng/Sai: {tf_count}).")
                     
                     for q in parsed_q:
                         q["points"] = default_q_pts
@@ -517,7 +590,7 @@ elif user["role"] == "Giáo viên / Quản trị viên":
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     ))
                     conn.commit()
-                    st.info(f"✅ Đã lưu đề thi `{up_code}` vào kho đề thành công!")
+                    st.info(f"✅ Đã lưu đề thi `{up_code}` vào kho đề!")
             except Exception as e:
                 st.error(f"Lỗi xử lý file: {e}")
                 
