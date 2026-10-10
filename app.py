@@ -28,7 +28,7 @@ st.markdown("""
 
 # --- KHỞI TẠO DATABASE SQLITE (WAL MODE CHO 35+ HỌC SINH ĐỒNG THỜI) ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v9.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v10.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("PRAGMA journal_mode=WAL;")
     
@@ -326,12 +326,12 @@ if user["role"] == "Học sinh":
         exam_duration = st.session_state.active_exam_duration
         questions = st.session_state.active_exam_questions
         
-        # --- BẢO MẬT NÂNG CAO: PHÁT ÂM THÀNH CẢNH BÁO + KHÓA MÀN HÌNH TỨC THÌ KHI GIAN LẬN ---
+        # --- BẢO MẬT NÂNG CAO: TÍCH HỢP BIẾN `isSubmitting` ĐỂ CHẶN LỖI KHI BẤM NỘP BÀI ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
             <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO - CHỐNG ĐA NHIỆM & AI</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Bắt buộc Toàn màn hình. Cấm chia đôi màn hình, mở cửa sổ nổi AI (Gemini) hoặc rời tab. Vi phạm sẽ hú còi cảnh báo và KHÓA BÀI NGAY!
+                Bắt buộc Toàn màn hình. Cấm chia đôi màn hình, mở cửa sổ nổi AI (Gemini) hoặc rời tab. Vi phạm sẽ hú còi và KHÓA BÀI!
             </p>
         </div>
         <script>
@@ -345,6 +345,15 @@ if user["role"] == "Học sinh":
         document.addEventListener("click", forceFullscreen);
 
         let isLocked = false;
+        let isSubmitting = false;
+
+        // Nhận diện khi học sinh click vào nút Nộp Bài để vô hiệu hóa bộ đếm chống gian lận
+        window.parent.document.addEventListener("click", function(e) {
+            let target = e.target.closest("button");
+            if (target && (target.innerText.includes("Nộp Bài") || target.innerText.includes("🚀"))) {
+                isSubmitting = true;
+            }
+        });
 
         // Hàm phát âm thanh cảnh báo (Web Audio API)
         function playAlarmSound() {
@@ -366,11 +375,10 @@ if user["role"] == "Học sinh":
 
         // Hàm khóa màn hình tức thì
         function triggerLockdown() {
-            if (isLocked) return;
+            if (isLocked || isSubmitting) return;
             isLocked = true;
             playAlarmSound();
 
-            // Tạo khung đỏ phủ kín toàn bộ trang web ngay lập tức
             let overlay = window.parent.document.createElement('div');
             overlay.style.position = 'fixed';
             overlay.style.top = '0';
@@ -394,21 +402,19 @@ if user["role"] == "Học sinh":
             }, 1800);
         }
 
-        // 1. Phát hiện mất tiêu điểm (blur) hoặc chuyển tab (visibilitychange)
         window.addEventListener("blur", function() {
-            triggerLockdown();
+            if (!isSubmitting) { triggerLockdown(); }
         });
 
         document.addEventListener("visibilitychange", function() {
-            if (document.hidden) {
+            if (document.hidden && !isSubmitting) {
                 triggerLockdown();
             }
         });
 
-        // 2. Phát hiện thay đổi kích thước khung hình đột ngột (chia đôi màn hình / mở app nổi AI)
         let initialWidth = window.innerWidth;
         window.addEventListener("resize", function() {
-            if (Math.abs(window.innerWidth - initialWidth) > 150) {
+            if (Math.abs(window.innerWidth - initialWidth) > 150 && !isSubmitting) {
                 triggerLockdown();
             }
         });
