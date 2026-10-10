@@ -14,10 +14,13 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- KHỞI TẠO DATABASE SQLITE ---
+# --- KHỞI TẠO DATABASE SQLITE (TÍCH HỢP WAL MODE CHO 35+ HỌC SINH ĐỒNG THỜI) ---
 def init_db():
-    conn = sqlite3.connect("exam_system_v6.db", check_same_thread=False)
+    conn = sqlite3.connect("exam_system_v7.db", check_same_thread=False)
     cursor = conn.cursor()
+    # Bật chế độ WAL để cho phép nhiều người đọc/ghi đồng thời không bị lỗi locked
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             email TEXT PRIMARY KEY,
@@ -78,7 +81,7 @@ def init_db():
 conn = init_db()
 cursor = conn.cursor()
 
-# --- HÀM PHÂN TÍCH WORD (PHÂN BIỆT CHỮ HOA A,B,C,D VÀ CHỮ THƯỜNG a,b,c,d) ---
+# --- HÀM PHÂN TÍCH WORD (PHÂN BIỆT A,B,C,D VÀ a,b,c,d) ---
 def parse_docx_to_questions(docx_file):
     doc = Document(docx_file)
     questions = []
@@ -103,12 +106,10 @@ def parse_docx_to_questions(docx_file):
                 "points": 1.0
             }
         elif current_q is not None:
-            # Trắc nghiệm dùng chữ HOA: A, B, C, D
             if (len(text) > 1 and text[0] in ['A', 'B', 'C', 'D'] and text[1] in ['.', ')', ' ']):
                 current_q["options"].append(text)
                 if is_underlined:
                     current_q["answer"] = text[0]
-            # Đúng/Sai dùng chữ thường: a, b, c, d
             elif (len(text) > 1 and text[0] in ['a', 'b', 'c', 'd'] and text[1] in ['.', ')', ' ']):
                 current_q["type"] = "true_false"
                 ans_val = "Đúng" if is_underlined else "Sai"
@@ -121,6 +122,29 @@ def parse_docx_to_questions(docx_file):
         questions.append(current_q)
     return questions
 
+# --- KIỂM TRA TÍN HIỆU VI PHẠM TỪ HỌC SINH (NẾU CÓ) ---
+if st.query_params.get("violated") == "true":
+    if "user" in st.session_state and st.session_state.user and st.session_state.user["role"] == "Học sinh":
+        u = st.session_state.user
+        e_code = st.session_state.get("active_exam", "UNKNOWN")
+        # Ghi nhận vi phạm vào database
+        cursor.execute("""
+            INSERT INTO submissions (exam_code, student_email, student_name, student_id, stt, class_name, score, violations, status, submitted_at, details)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            e_code, u["email"], u["name"], u["student_id"], u["stt"], u["class_name"],
+            0.0, 1, "⚠️ Vi phạm (Rời màn hình/AI)", datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            json.dumps([{"error": "Học sinh rời khỏi tab hoặc mở trợ lý AI trong lúc thi"}], ensure_ascii=False)
+        ))
+        conn.commit()
+        if "active_exam" in st.session_state:
+            del st.session_state["active_exam"]
+    st.error("🚨 BẠN ĐÃ VI PHẠM QUY CHẾ THI! Bài làm đã bị khóa và báo cáo về cho giáo viên.")
+    if st.button("Quay lại màn hình chính"):
+        st.query_params.clear()
+        st.rerun()
+    st.stop()
+
 # --- XÁC THỰC & ĐĂNG NHẬP ---
 st.sidebar.title("🔐 Đăng Nhập Hệ Thống")
 
@@ -131,7 +155,7 @@ if st.session_state.user is None:
     st.markdown("""
     <div style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); padding: 30px; border-radius: 12px; color: white; text-align: center; margin-bottom: 25px;">
         <h1 style="color: white; margin-bottom: 10px;">🎓 HỆ THỐNG KIỂM TRA TRỰC TUYẾN THÔNG MINH</h1>
-        <p style="font-size: 16px; opacity: 0.9;">Bảo mật cao - Chống gian lận - Quét đề thông minh</p>
+        <p style="font-size: 16px; opacity: 0.9;">Bảo mật cao - Chống gian lận - Quét đề tự động</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -279,16 +303,11 @@ if user["role"] == "Học sinh":
         st.rerun()
         
     if "active_exam" in st.session_state and st.session_state.active_exam == exam_code_input:
-        cursor.execute("SELECT questions FROM exams WHERE exam_code = ?", (exam_code_input,))
-        q_row = cursor.fetchone()
-        questions = json.loads(q_row[0])
-        
-        # --- JAVASCRIPT BẢO MẬT DÀNH RIÊNG CHO HỌC SINH LÀM BÀI ---
         security_script = """
         <div style="padding: 12px; background: #ffebee; border-left: 6px solid #d32f2f; margin-bottom: 15px; border-radius: 4px;">
             <h4 style="margin: 0; color: #b71c1c;">🚨 PHÒNG THI AN NINH CAO</h4>
             <p style="margin: 5px 0 0 0; font-size: 13px; color: #c62828;">
-                Hệ thống chạy <b>Toàn màn hình</b>. Mọi hành vi rời màn hình hoặc bật trợ lý AI nổi sẽ làm bài thi bị KHÓA NGAY!
+                Hệ thống chạy <b>Toàn màn hình</b>. Mọi hành vi rời màn hình hoặc bật trợ lý AI sẽ làm bài thi bị KHÓA NGAY!
             </p>
         </div>
         <script>
@@ -305,16 +324,16 @@ if user["role"] == "Học sinh":
         window.addEventListener("blur", function() {
             if (!isLocked) {
                 isLocked = true;
-                alert("🚨 PHÁT HIỆN RỜI MÀN HÌNH HOẶC DÙNG TRỢ LÝ AI! Bài thi bị khóa.");
-                window.location.reload();
+                let currentUrl = window.parent.location.href.split('?')[0];
+                window.parent.location.href = currentUrl + "?violated=true";
             }
         });
 
         document.addEventListener("visibilitychange", function() {
             if (document.hidden && !isLocked) {
                 isLocked = true;
-                alert("🚨 RỜI KHỎI BÀI THI! Bài thi đã bị khóa.");
-                window.location.reload();
+                let currentUrl = window.parent.location.href.split('?')[0];
+                window.parent.location.href = currentUrl + "?violated=true";
             }
         });
         </script>
@@ -422,7 +441,6 @@ if user["role"] == "Học sinh":
             
             del st.session_state.active_exam
             
-            # Thoát Fullscreen khi nộp bài
             exit_script = "<script>if (document.fullscreenElement) { document.exitFullscreen(); }</script>"
             components.html(exit_script, height=0)
             
@@ -439,11 +457,12 @@ if user["role"] == "Học sinh":
 elif user["role"] == "Giáo viên / Quản trị viên":
     st.title("⚙️ Cổng Quản Lý Giáo Viên & Kho Đề Thi")
     
-    t_tab1, t_tab2, t_tab3, t_tab4 = st.tabs([
-        "📁 Kho Đề Thi & Tải Lên Word", 
-        "🏫 Quản Lý Lớp Học & Học Sinh", 
-        "📊 Bảng Điểm Theo Lớp & Xuất Excel", 
-        "🔐 Cài Đặt Mật Khẩu Admin"
+    t_tab1, t_tab2, t_tab3, t_tab4, t_tab5 = st.tabs([
+        "📁 Kho Đề Thi & Tải Lên", 
+        "🏫 Quản Lý Lớp & Học Sinh", 
+        "📊 Bảng Điểm & Xuất Excel", 
+        "🚨 Thống Kê Vi Phạm", 
+        "🔐 Đổi Mật Khẩu Admin"
     ])
     
     with t_tab1:
@@ -585,6 +604,21 @@ elif user["role"] == "Giáo viên / Quản trị viên":
             st.info("Chưa có lớp học nào.")
 
     with t_tab4:
+        st.subheader("🚨 Thống Kê Học Sinh Vi Phạm Quy Chế Thi")
+        cursor.execute("""
+            SELECT id, exam_code, student_name, student_id, stt, class_name, status, submitted_at 
+            FROM submissions WHERE violations > 0 OR status LIKE '%vi phạm%' OR status LIKE '%khóa%'
+        """)
+        violations_db = cursor.fetchall()
+        
+        if violations_db:
+            df_violations = pd.DataFrame(violations_db, columns=["ID", "Mã đề", "Họ tên", "MSSV", "STT", "Lớp", "Trạng thái vi phạm", "Thời gian ghi nhận"])
+            st.dataframe(df_violations, use_container_width=True)
+            st.warning("⚠️ Những học sinh có tên trong danh sách trên đã thực hiện hành vi rời khỏi tab, thu nhỏ màn hình hoặc bật ứng dụng trợ lý AI trong lúc làm bài!")
+        else:
+            st.success("🎉 Tuyệt vời! Chưa có học sinh nào vi phạm quy chế trong đợt kiểm tra này.")
+
+    with t_tab5:
         st.subheader("🔐 Đổi Mật Khẩu Quản Trị (Admin)")
         new_pwd = st.text_input("Mật khẩu admin mới:", type="password")
         if st.button("Cập Nhật Mật Khẩu"):
